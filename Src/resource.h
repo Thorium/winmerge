@@ -107,6 +107,7 @@
 #define IDD_DARK_FONT_DIALOG            289
 #define IDD_COMPARISON_RESULT_FILTER    290
 #define IDD_FILTERS_MATCHINSIDE         291
+#define IDD_SEMANTIC_PREVIEW_DLG        292
 #define IDI_ROTATE2                     302
 #define IDR_LOGO                        307
 #define IDR_MARGIN_ICONS_PNG            310
@@ -702,6 +703,8 @@
 #define IDC_COLOR_SCHEME_SAVE           1693
 #define IDC_COLOR_SCHEME_DELETE         1694
 #define IDC_USERDATA_LOCATION           1695
+#define IDC_SEMANTIC_PREVIEW_HEADER     1696
+#define IDC_SEMANTIC_PREVIEW_CODE       1697
 #define IDC_RADIO_INCLUDE               1700
 #define IDC_RADIO_EXCLUDE               1701
 #define IDC_CHECK_IDENTICAL             1702
@@ -2315,9 +2318,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
-#define _APS_NEXT_RESOURCE_VALUE        290
+#define _APS_NEXT_RESOURCE_VALUE        293
 #define _APS_NEXT_COMMAND_VALUE         34194
-#define _APS_NEXT_CONTROL_VALUE         1696
+#define _APS_NEXT_CONTROL_VALUE         1698
 #define _APS_NEXT_SYMED_VALUE           134
 #endif
 #endif

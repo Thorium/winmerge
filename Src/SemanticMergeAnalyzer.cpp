@@ -657,6 +657,21 @@ bool TryFindBestTagForDiff(const std::vector<TagRange>& tags, int startLine, int
 	return found;
 }
 
+bool TryFindUniqueTagByName(const std::vector<TagRange>& tags, const std::string& name, TagRange& found)
+{
+	bool any = false;
+	for (const auto& tag : tags)
+	{
+		if (tag.name != name)
+			continue;
+		if (any)
+			return false;
+		found = tag;
+		any = true;
+	}
+	return any;
+}
+
 bool HaveSameDestinationDefinition(const Suggestion& left, const Suggestion& right, int dstPane)
 {
 	if (left.insertOnly || right.insertOnly)
@@ -816,7 +831,7 @@ bool Analyzer::TryBuildInsertionSuggestion(int dstPane, const DiffInfo& diff, Su
 	return true;
 }
 
-bool Analyzer::FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, String& message) const
+bool Analyzer::FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, String& message, bool allowAdoptAgreed /*= false*/) const
 {
 	for (int pane = 0; pane < m_nPanes; ++pane)
 	{
@@ -989,18 +1004,30 @@ bool Analyzer::FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, S
 		return true;
 	}
 
-	if (dstPane != suggestion.unchangedPane)
+	if (suggestion.defs[dstPane].text == suggestion.defs[suggestion.changedPane].text)
+	{
+		if (!allowAdoptAgreed)
+		{
+			message = _("The destination pane already contains the latest semantic definition text.");
+			return false;
+		}
+		// The destination holds the odd-one-out version while the two other
+		// panes agree: adopt their agreed definition (catching the pane up
+		// after an earlier copy, or explicitly reverting the change).
+		suggestion.srcPane = suggestion.unchangedPane;
+		suggestion.displayName = ucr::toTString(suggestion.tags[0].name);
+		suggestion.replacementText = suggestion.defs[suggestion.unchangedPane].text;
+		suggestion.previewText = suggestion.replacementText;
+		return true;
+	}
+
+	if (suggestion.defs[dstPane].text != suggestion.defs[suggestion.unchangedPane].text)
 	{
 		message = _("Semantic merge suggestion is currently only available when the destination pane still has the unchanged definition text.");
 		return false;
 	}
 
-	if (suggestion.defs[dstPane].text == suggestion.defs[suggestion.changedPane].text)
-	{
-		message = _("The destination pane already contains the latest semantic definition text.");
-		return false;
-	}
-
+	suggestion.srcPane = suggestion.changedPane;
 	suggestion.displayName = ucr::toTString(suggestion.tags[0].name);
 	suggestion.replacementText = suggestion.defs[suggestion.changedPane].text;
 	suggestion.previewText = suggestion.defs[suggestion.changedPane].text;
@@ -1111,6 +1138,69 @@ bool Analyzer::TryBuildCommentedBlockSuggestion(int dstPane, const DiffInfo& dif
 	return true;
 }
 
+std::vector<std::string> Analyzer::CollectCandidateDefinitionNames(const DiffInfo& diff) const
+{
+	// Candidate definitions the diff may refer to, most relevant first: the
+	// definition under the user's cursor (anchor), then each pane's own
+	// mapping of the diff's line range.
+	std::vector<std::string> names;
+	auto addName = [&names](const std::string& name)
+	{
+		if (std::find(names.begin(), names.end(), name) == names.end())
+			names.push_back(name);
+	};
+
+	if (diff.anchorPane >= 0 && diff.anchorPane < m_nPanes && diff.anchorLine >= 0)
+	{
+		TagRange anchorTag;
+		if (TryFindBestTagForDiff(m_panes[diff.anchorPane].tags, diff.anchorLine, diff.anchorLine, anchorTag))
+			addName(anchorTag.name);
+	}
+
+	for (int pane = 0; pane < m_nPanes; ++pane)
+	{
+		TagRange tag;
+		if (TryFindBestTagForDiff(m_panes[pane].tags, diff.dbegin, diff.dend, tag))
+			addName(tag.name);
+	}
+	return names;
+}
+
+bool Analyzer::TryReconcileTagsByName(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const
+{
+	// The diff's line range may land in differently named definitions across
+	// panes when surrounding code has shifted or moved. Try each candidate
+	// definition that exists exactly once in every pane, wherever it is
+	// located, and accept the first that yields a valid suggestion.
+	String firstMessage;
+	for (const std::string& name : CollectCandidateDefinitionNames(diff))
+	{
+		TagRange reconciled[3];
+		bool foundInAllPanes = true;
+		for (int pane = 0; pane < m_nPanes && foundInAllPanes; ++pane)
+			foundInAllPanes = TryFindUniqueTagByName(m_panes[pane].tags, name, reconciled[pane]);
+		if (!foundInAllPanes)
+			continue;
+
+		Suggestion trial;
+		for (int pane = 0; pane < m_nPanes; ++pane)
+			trial.tags[pane] = reconciled[pane];
+
+		String trialMessage;
+		if (FinalizeStandardSuggestion(dstPane, trial, trialMessage, diff.allowAdoptAgreed))
+		{
+			suggestion = trial;
+			return true;
+		}
+		if (firstMessage.empty())
+			firstMessage = trialMessage;
+	}
+
+	if (!firstMessage.empty())
+		message = firstMessage;
+	return false;
+}
+
 bool Analyzer::TryBuildSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const
 {
 	message.clear();
@@ -1138,20 +1228,48 @@ bool Analyzer::TryBuildSuggestion(int dstPane, const DiffInfo& diff, Suggestion&
 		if (!TryFindBestTagForDiff(m_panes[pane].tags, diff.dbegin, diff.dend, suggestion.tags[pane]))
 			foundAllTags = false;
 	}
+	const bool namesAgree = foundAllTags &&
+		suggestion.tags[0].name == suggestion.tags[1].name &&
+		suggestion.tags[0].name == suggestion.tags[2].name;
 
-	if (foundAllTags)
+	if (namesAgree)
 	{
-		if (suggestion.tags[0].name != suggestion.tags[1].name || suggestion.tags[0].name != suggestion.tags[2].name)
+		// The anchor may point at a different definition inside the same
+		// diff block; prefer it when it yields a valid suggestion.
+		std::string anchorName;
+		TagRange anchorTag;
+		if (diff.anchorPane >= 0 && diff.anchorPane < m_nPanes && diff.anchorLine >= 0 &&
+			TryFindBestTagForDiff(m_panes[diff.anchorPane].tags, diff.anchorLine, diff.anchorLine, anchorTag))
+			anchorName = anchorTag.name;
+		if (!anchorName.empty() && anchorName != suggestion.tags[0].name)
 		{
-			if (TryBuildInsertionSuggestion(dstPane, diff, suggestion))
+			String anchoredMessage;
+			if (TryReconcileTagsByName(dstPane, diff, suggestion, anchoredMessage))
 				return true;
-			message = _("The selected difference maps to different definitions across panes, so no safe semantic merge suggestion is available.");
-			return false;
 		}
-		return FinalizeStandardSuggestion(dstPane, suggestion, message);
+		return FinalizeStandardSuggestion(dstPane, suggestion, message, diff.allowAdoptAgreed);
 	}
 
-	return TryBuildCommentedBlockSuggestion(dstPane, diff, suggestion, message);
+	if (foundAllTags && TryBuildInsertionSuggestion(dstPane, diff, suggestion))
+		return true;
+
+	// When a pane has no definition at the diff lines, the block may be a
+	// commented-out copy of a definition from the other panes.
+	String commentedMessage;
+	if (!foundAllTags && TryBuildCommentedBlockSuggestion(dstPane, diff, suggestion, commentedMessage))
+		return true;
+
+	// The diff's line range maps to differently named (or missing)
+	// definitions across panes; retry the candidates by name, wherever each
+	// definition is located in each pane.
+	if (TryReconcileTagsByName(dstPane, diff, suggestion, message))
+		return true;
+
+	if (message.empty())
+		message = commentedMessage;
+	if (message.empty())
+		message = _("The selected difference maps to different definitions across panes, so no safe semantic merge suggestion is available.");
+	return false;
 }
 
 bool Analyzer::TryCollectIndependentAdditionSuggestions(int dstPane, std::vector<Suggestion>& suggestions, String& message) const

@@ -368,8 +368,146 @@ TEST(SemanticMergeAnalyzer, StandardReplaceTakesChangedDefinition)
 	EXPECT_FALSE(suggestion.insertOnly);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("value + 5")));
 
-	// Applying to the already-changed pane is rejected.
+	// Applying to the already-changed pane is rejected by default (the CLI
+	// and copy-all paths must not silently overwrite the changed version).
 	EXPECT_FALSE(analyzer.TryBuildSuggestion(2, MakeDiff(2, 2), suggestion, message));
+
+	// Interactive commands may let the changed pane adopt the definition the
+	// two other panes agree on (catch-up/revert), with a preview.
+	SemanticMerge::DiffInfo adoptDiff = MakeDiff(2, 2);
+	adoptDiff.allowAdoptAgreed = true;
+	SemanticMerge::Suggestion adoption;
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, adoptDiff, adoption, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(adoption.unchangedPane, adoption.srcPane);
+	EXPECT_NE(String::npos, adoption.replacementText.find(_T("value + 1")));
+}
+
+TEST(SemanticMergeAnalyzer, ShiftedDefinitionsAreReconciledByName)
+{
+	// The changed definition sits at different line positions per pane, so
+	// mapping the diff's line range lands in differently named definitions.
+	// The analyzer must fall back to matching the definition by name.
+	std::vector<String> left = {
+		_T("int Helper(int x)"),
+		_T("{"),
+		_T("\treturn x;"),
+		_T("}"),
+		_T(""),
+		_T("int Compute(int base)"),
+		_T("{"),
+		_T("\treturn base + 9;"),
+		_T("}"),
+	};
+	std::vector<String> other = {
+		_T("int Compute(int base)"),
+		_T("{"),
+		_T("\treturn base + 1;"),
+		_T("}"),
+		_T(""),
+		_T("int Helper(int x)"),
+		_T("{"),
+		_T("\treturn x;"),
+		_T("}"),
+	};
+
+	ThreeWayFixture fx(left, other, other);
+	auto analyzer = fx.MakeAnalyzer();
+
+	// Diff covers left's Compute (lines 5-8); the same range in the other
+	// panes overlaps Helper instead.
+	SemanticMerge::Suggestion suggestion;
+	String message;
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(1, MakeDiff(5, 8), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(0, suggestion.changedPane);
+	EXPECT_EQ(0, suggestion.tags[1].startLine);
+	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("base + 9")));
+}
+
+TEST(SemanticMergeAnalyzer, CandidateLoopSkipsIdenticalDefinition)
+{
+	// Middle reordered the functions and changed BuildMessage. The diff line
+	// lands inside BuildMessage in the middle pane but inside Multiply in the
+	// outer panes. Multiply is identical everywhere, so it cannot produce a
+	// suggestion; the analyzer must move on to BuildMessage instead of
+	// giving up after Multiply fails.
+	std::vector<String> outer = {
+		_T("int Multiply(int left, int right)"),
+		_T("{"),
+		_T("\treturn left * right;"),
+		_T("}"),
+		_T(""),
+		_T("const char* BuildMessage()"),
+		_T("{"),
+		_T("\treturn \"stable version\";"),
+		_T("}"),
+	};
+	std::vector<String> middle = {
+		_T("const char* BuildMessage()"),
+		_T("{"),
+		_T("\treturn \"changed version\";"),
+		_T("}"),
+		_T(""),
+		_T("int Multiply(int left, int right)"),
+		_T("{"),
+		_T("\treturn left * right;"),
+		_T("}"),
+	};
+
+	ThreeWayFixture fx(outer, middle, outer);
+	auto analyzer = fx.MakeAnalyzer();
+
+	SemanticMerge::Suggestion suggestion;
+	String message;
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, MakeDiff(2, 2), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(1, suggestion.changedPane);
+	EXPECT_EQ(_T("BuildMessage"), suggestion.displayName);
+	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("changed version")));
+}
+
+TEST(SemanticMergeAnalyzer, CursorAnchorSelectsDefinitionInsideWideDiff)
+{
+	// Middle changed two reordered functions; a single diff block spans both.
+	// The cursor anchor decides which definition the user means.
+	std::vector<String> outer = {
+		_T("int F(int a)"),
+		_T("{"),
+		_T("\treturn 1;"),
+		_T("}"),
+		_T(""),
+		_T("int G(int a)"),
+		_T("{"),
+		_T("\treturn 2;"),
+		_T("}"),
+	};
+	std::vector<String> middle = {
+		_T("int G(int a)"),
+		_T("{"),
+		_T("\treturn 20;"),
+		_T("}"),
+		_T(""),
+		_T("int F(int a)"),
+		_T("{"),
+		_T("\treturn 10;"),
+		_T("}"),
+	};
+
+	ThreeWayFixture fx(outer, middle, outer);
+	auto analyzer = fx.MakeAnalyzer();
+
+	SemanticMerge::DiffInfo diff = MakeDiff(0, 8);
+	diff.anchorPane = 1;
+	diff.anchorLine = 2; // middle's G body
+
+	SemanticMerge::Suggestion suggestion;
+	String message;
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, diff, suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(_T("G"), suggestion.displayName);
+	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("return 20")));
+
+	diff.anchorLine = 7; // middle's F body
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, diff, suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(_T("F"), suggestion.displayName);
+	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("return 10")));
 }
 
 TEST(SemanticMergeAnalyzer, StringLiteralReplayOntoRefactoredPane)
@@ -796,6 +934,28 @@ TEST(SemanticMergeManualData, CliTripleStandardReplace)
 	const bool ok = analyzer.TryBuildSuggestion(0, MakeDiff(0, lineCount - 1), suggestion, message);
 	ASSERT_TRUE(ok) << ucr::toUTF8(message);
 	EXPECT_EQ(1, suggestion.changedPane);
+
+	// The right pane holds the same unchanged text, so it must be accepted
+	// as a destination too (the CLI -smr path).
+	SemanticMerge::Suggestion rightSuggestion;
+	message.clear();
+	const bool okRight = analyzer.TryBuildSuggestion(2, MakeDiff(0, lineCount - 1), rightSuggestion, message);
+	ASSERT_TRUE(okRight) << ucr::toUTF8(message);
+	EXPECT_EQ(1, rightSuggestion.changedPane);
+
+	// The middle pane already has the changed text; asking to copy into it
+	// must be rejected by default...
+	SemanticMerge::Suggestion middleSuggestion;
+	message.clear();
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(1, MakeDiff(0, lineCount - 1), middleSuggestion, message));
+
+	// ...but with adoption enabled it reverts the middle pane to the version
+	// the outer panes agree on.
+	SemanticMerge::DiffInfo adoptDiff = MakeDiff(0, lineCount - 1);
+	adoptDiff.allowAdoptAgreed = true;
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(1, adoptDiff, middleSuggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(middleSuggestion.unchangedPane, middleSuggestion.srcPane);
+	EXPECT_NE(String::npos, middleSuggestion.replacementText.find(_T("base + 1")));
 }
 
 } // namespace

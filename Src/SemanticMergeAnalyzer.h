@@ -84,6 +84,20 @@ struct DiffInfo
 	int dbegin = 0;
 	int dend = 0;
 	OP_TYPE op = OP_NONE;
+	/**
+	 * Optional anchor: the pane and line the user invoked the command from.
+	 * When the diff spans several definitions, the definition under the
+	 * anchor is preferred. -1 means no anchor.
+	 */
+	int anchorPane = -1;
+	int anchorLine = -1;
+	/**
+	 * Allow the destination pane that holds the single changed version to
+	 * adopt the definition the two other panes agree on (catch-up/revert).
+	 * Only interactive, previewed commands enable this; unattended merges
+	 * (CLI, copy-all) must never silently overwrite the changed version.
+	 */
+	bool allowAdoptAgreed = false;
 };
 
 struct DefinitionInfo
@@ -100,6 +114,7 @@ struct Suggestion
 	DefinitionInfo defs[3];
 	int unchangedPane = -1;
 	int changedPane = -1;
+	int srcPane = -1; /**< pane whose text is applied; equals changedPane unless adopting the agreed version */
 	bool insertOnly = false;
 	int insertLine = -1;
 	int insertChar = 0;
@@ -137,7 +152,9 @@ public:
 
 private:
 	bool TryBuildInsertionSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion) const;
-	bool FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, String& message) const;
+	std::vector<std::string> CollectCandidateDefinitionNames(const DiffInfo& diff) const;
+	bool TryReconcileTagsByName(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const;
+	bool FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, String& message, bool allowAdoptAgreed = false) const;
 	bool TryBuildCommentedBlockSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const;
 	bool TryCollectIndependentAdditionSuggestions(int dstPane, std::vector<Suggestion>& suggestions, String& message) const;
 	bool AllPanesHaveLanguage() const;
@@ -194,5 +211,8 @@ String RenderLineCommentedBlock(const String& text, const String& prefix);
 
 /** @brief Find the definition that best overlaps the given line range. */
 bool TryFindBestTagForDiff(const std::vector<TagRange>& tags, int startLine, int endLine, TagRange& bestTag);
+
+/** @brief Find the definition with the given name; fails if absent or ambiguous. */
+bool TryFindUniqueTagByName(const std::vector<TagRange>& tags, const std::string& name, TagRange& found);
 
 } // namespace SemanticMerge

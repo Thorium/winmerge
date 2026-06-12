@@ -176,11 +176,15 @@ public:
 	void CopyMultiplePartialList(int srcPane, int dstPane, int activePane,
 		int firstDiff, int lastDiff, const CEPoint& ptStart, const CEPoint& ptEnd, bool bCharacter);
 	void DoAutoMerge(int dstPane);
-	bool PreviewSemanticMergeSuggestion(int dstPane, int nDiff, String& preview, String& message);
-	bool DoSemanticMergeSuggestion(int dstPane, int nDiff, String& message);
-	bool PreviewAllSemanticMergeSuggestions(int dstPane, String& preview, String& message);
+	bool PreviewSemanticMergeSuggestion(int dstPane, int nDiff, String& previewHeader, String& previewCode, String& message,
+		int anchorPane = -1, int anchorLine = -1, bool allowAdoptAgreed = false);
+	bool DoSemanticMergeSuggestion(int dstPane, int nDiff, String& message,
+		int anchorPane = -1, int anchorLine = -1, bool allowAdoptAgreed = false);
+	bool PreviewAllSemanticMergeSuggestions(int dstPane, String& previewHeader, String& previewCode, String& message);
+	String GetSemanticPreviewFileExt(int pane) const;
 	bool DoAllSemanticMergeSuggestions(int dstPane, String& message);
-	bool FindFirstSemanticMergeSuggestion(int dstPane, int& nDiff, String& message) const;
+	bool FindFirstSemanticMergeSuggestion(int dstPane, int& nDiff, String& message,
+		int anchorPane = -1, int anchorLine = -1, bool allowAdoptAgreed = false) const;
 	bool SanityCheckDiff(const DIFFRANGE& dr) const;
 	bool HasInvisibleLines(int firstDiff, int lastDiff) const;
 	bool InlineDiffListCopy(int srcPane, int dstPane, int nDiff, int nFirstWordDiff, int nLastWordDiff, const std::vector<int>* pWordDiffIndice, bool bGroupWithPrevious = false, bool bUpdateView = true);

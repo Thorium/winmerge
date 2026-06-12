@@ -13,6 +13,8 @@
 #include "DiffList.h"
 #include "MergeLineFlags.h"
 #include "MergeFrameCommon.h"
+#include "OptionsMgr.h"
+#include "OptionsDef.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -335,6 +337,36 @@ void CMergeDoc::DoAutoMerge(int dstPane)
 	else if (mergedEOLStyle.first == Conflict)
 		ShowMessageBox(_("EOL changes are conflicting."), MB_ICONINFORMATION);
 
+	// Optionally try safe semantic copy on conflicts before the line merge:
+	// the line merge resolves the one-sided fragments of a conflicting
+	// definition independently, which can leave it semantically mangled
+	// (e.g. a renamed parameter without its renamed use sites) and destroys
+	// the clean per-pane versions the semantic analyzer needs. Each
+	// successful apply rescans and renumbers the diff list, so restart the
+	// scan after every hit.
+	int semanticMergedCount = 0;
+	if (GetOptionsMgr()->GetBool(OPT_AUTO_MERGE_SEMANTIC_FALLBACK) && IsSemanticMergeEnabled())
+	{
+		bool applied = true;
+		while (applied)
+		{
+			applied = false;
+			for (int i = 0; i < m_diffList.GetSize(); ++i)
+			{
+				const DIFFRANGE* pdi = m_diffList.DiffRangeAt(i);
+				if (pdi == nullptr || pdi->op != OP_DIFF || !m_diffList.IsDiffSignificant(i))
+					continue;
+				String semanticMessage;
+				if (DoSemanticMergeSuggestion(dstPane, i, semanticMessage))
+				{
+					++semanticMergedCount;
+					applied = true;
+					break;
+				}
+			}
+		}
+	}
+
 	RescanSuppress suppressRescan(*this);
 
 	// Note we don't care about m_nDiffs count to become zero,
@@ -390,20 +422,25 @@ void CMergeDoc::DoAutoMerge(int dstPane)
 	FlushAndRescan();
 	UpdateHeaderPath(dstPane);
 
-	if (autoMergedCount > 0)
+	if (autoMergedCount > 0 || semanticMergedCount > 0)
 		m_bAutoMerged = true;
 
-	// move to first conflict 
+	// move to first conflict
 	const int nDiff = m_diffList.FirstSignificant3wayDiff(THREEWAYDIFFTYPE_CONFLICT);
 	if (nDiff != -1)
 		pViewDst->SelectDiff(nDiff, true, false);
 
-	ShowMessageBox(
-		strutils::format_string2(
-			_("Automatic merges: %1\nUnresolved conflicts: %2"),
-			strutils::format(_T("%d"), autoMergedCount),
-			strutils::format(_T("%d"), unresolvedConflictCount)),
-		MB_ICONINFORMATION);
+	String mergeReport = strutils::format_string2(
+		_("Automatic merges: %1\nUnresolved conflicts: %2"),
+		strutils::format(_T("%d"), autoMergedCount),
+		strutils::format(_T("%d"), unresolvedConflictCount));
+	if (semanticMergedCount > 0)
+	{
+		mergeReport += _T("\n");
+		mergeReport += strutils::format_string1(_("Safe semantic merges: %1"),
+			strutils::format(_T("%d"), semanticMergedCount));
+	}
+	ShowMessageBox(mergeReport, MB_ICONINFORMATION);
 }
 
 /**

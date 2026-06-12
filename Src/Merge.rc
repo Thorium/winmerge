@@ -116,6 +116,8 @@ BEGIN
             MENUITEM SEPARATOR
             MENUITEM "To Current Pane\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
             MENUITEM "All to Current Pane\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
+            MENUITEM SEPARATOR
+            MENUITEM "Use for Auto Mer&ge Conflicts", ID_SEMANTIC_MERGE_AUTO_FALLBACK
         END
         POPUP "Add to &Filters"
         BEGIN
@@ -878,6 +880,8 @@ BEGIN
             MENUITEM SEPARATOR
             MENUITEM "To Current Pane\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
             MENUITEM "All to Current Pane\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
+            MENUITEM SEPARATOR
+            MENUITEM "Use for Auto Mer&ge Conflicts", ID_SEMANTIC_MERGE_AUTO_FALLBACK
         END
         MENUITEM SEPARATOR
         MENUITEM "Add &Synchronization Point\tAlt+S", ID_ADD_SYNCPOINT
@@ -5327,6 +5331,7 @@ BEGIN
     ID_SEMANTIC_MERGE_LEFT  "\nSafe Semantic Copy to Left"
     ID_SEMANTIC_MERGE_MIDDLE "\nSafe Semantic Copy to Middle"
     ID_SEMANTIC_MERGE_RIGHT "\nSafe Semantic Copy to Right"
+    ID_SEMANTIC_MERGE_AUTO_FALLBACK "\nTry safe semantic copy on conflicts that Auto Merge cannot resolve"
     ID_FIRSTFILE            "\nFirst File"
     ID_NEXTFILE             "\nNext File (Ctrl+F8)"
     ID_LASTFILE             "\nLast File"

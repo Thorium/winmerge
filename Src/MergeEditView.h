@@ -276,6 +276,8 @@ protected:
 	afx_msg void OnUpdateSemanticMerge(CCmdUI* pCmdUI);
 	afx_msg void OnSemanticMergeAll();
 	afx_msg void OnUpdateSemanticMergeAll(CCmdUI* pCmdUI);
+	afx_msg void OnSemanticMergeAutoFallback();
+	afx_msg void OnUpdateSemanticMergeAutoFallback(CCmdUI* pCmdUI);
 	afx_msg void OnSemanticMergeToPane(UINT nID);
 	afx_msg void OnUpdateSemanticMergeToPane(CCmdUI* pCmdUI);
 	afx_msg void OnCopyX2Y(UINT nID);

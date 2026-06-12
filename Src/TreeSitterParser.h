@@ -88,7 +88,7 @@ private:
     /** @brief Helper to load and compile a .scm query file. */
     TSQuery* LoadQuery(const std::wstring& sPath);
 
-    HMODULE           m_hDll;
+    void*             m_hDll; /**< Grammar DLL handle (HMODULE; void* keeps this header windows.h-free) */
     const TSLanguage* m_pLanguage;
     TSQuery*          m_pHighlightQuery;
     TSQuery*          m_pLocalsQuery;
@@ -165,6 +165,19 @@ struct TreeSitterLineBlock
 class CTreeSitterParser
 {
 public:
+    struct TagRange
+    {
+        std::string name;
+        uint32_t startByte;
+        uint32_t endByte;
+        uint32_t nameStartByte;
+        uint32_t nameEndByte;
+        int startLine;
+        int startChar;
+        int endLine;
+        int endChar;
+    };
+
     CTreeSitterParser();
     ~CTreeSitterParser();
 
@@ -274,6 +287,12 @@ public:
     bool FindDefinition(ITextBuffer* pBuffer, int nLineIndex, int nCharPos, int& nDefLine, int& nDefChar) const;
 
     /**
+     * @brief Get all top-level definitions found by the tags query.
+     * @return Definitions with byte and (line, char) ranges, in document order.
+     */
+    std::vector<TagRange> GetTagRanges() const;
+
+    /**
      * @brief Get a breadcrumb of the enclosing named definitions at a position.
      * @param nLineIndex  Zero-based line index.
      * @param nCharPos    Zero-based character position in line.
@@ -300,6 +319,8 @@ public:
 	void ParseFromBuffer(ITextBuffer* pBuffer);
 
 private:
+    struct TagDef;
+
     void EnsureParser();
     void RunHighlightQuery();
     void RunLocalsQuery();
@@ -311,6 +332,7 @@ private:
     bool TryGetDefinitionByteRangeAt(uint32_t byteOffset, uint32_t& defStartByte, uint32_t& defEndByte) const;
     bool ByteOffsetToLineChar(uint32_t byteOffset, int& nLineIndex, int& nCharPos) const;
     bool TryGetTagDefinitionByNameAt(ITextBuffer* pBuffer, int nLineIndex, int nCharPos, uint32_t& defStartByte, uint32_t& defEndByte) const;
+    bool TryBuildTagRange(const TagDef& def, TagRange& tagRange) const;
     uint32_t NextBlockOrder() { return m_nextBlockOrder++; }
 
     /**
@@ -383,6 +405,8 @@ private:
         std::string name;
         uint32_t    startByte;
         uint32_t    endByte;
+        uint32_t    nameStartByte;
+        uint32_t    nameEndByte;
     };
 
     struct TagRef

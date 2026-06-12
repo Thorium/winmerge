@@ -241,7 +241,7 @@ CTreeSitterLanguage::~CTreeSitterLanguage()
     if (m_pInjectionQuery)
         ts_query_delete(m_pInjectionQuery);
     if (m_hDll)
-        FreeLibrary(m_hDll);
+        FreeLibrary(static_cast<HMODULE>(m_hDll));
 }
 
 TSQuery* CTreeSitterLanguage::LoadQuery(const std::wstring& sPath)
@@ -297,10 +297,10 @@ bool CTreeSitterLanguage::Load(const std::wstring& sGrammarDir, const std::wstri
 
     typedef const TSLanguage* (*TSLanguageFunc)();
     TSLanguageFunc pfnLanguage = reinterpret_cast<TSLanguageFunc>(
-        GetProcAddress(m_hDll, sFuncName.c_str()));
+        GetProcAddress(static_cast<HMODULE>(m_hDll), sFuncName.c_str()));
     if (!pfnLanguage)
     {
-        FreeLibrary(m_hDll);
+        FreeLibrary(static_cast<HMODULE>(m_hDll));
         m_hDll = nullptr;
         return false;
     }
@@ -308,7 +308,7 @@ bool CTreeSitterLanguage::Load(const std::wstring& sGrammarDir, const std::wstri
     m_pLanguage = pfnLanguage();
     if (!m_pLanguage)
     {
-        FreeLibrary(m_hDll);
+        FreeLibrary(static_cast<HMODULE>(m_hDll));
         m_hDll = nullptr;
         return false;
     }
@@ -770,6 +770,32 @@ void CTreeSitterParser::RunTagsQuery()
     if (!pCursor)
         return;
 
+    auto expandDefinitionNode = [](TSNode node, const std::string& captureName) -> TSNode
+    {
+        if (HasCapturePrefix(captureName, "definition.function") ||
+            HasCapturePrefix(captureName, "definition.method"))
+        {
+            for (TSNode current = node; !ts_node_is_null(current); current = ts_node_parent(current))
+            {
+                const char* nodeType = ts_node_type(current);
+                if (nodeType && strcmp(nodeType, "function_definition") == 0)
+                    return current;
+            }
+        }
+
+        TSNode expanded = node;
+        for (;;)
+        {
+            TSNode parent = ts_node_parent(expanded);
+            if (ts_node_is_null(parent) || !ts_node_is_named(parent))
+                break;
+            if (ts_node_start_byte(parent) != ts_node_start_byte(expanded))
+                break;
+            expanded = parent;
+        }
+        return expanded;
+    };
+
     ts_query_cursor_exec(pCursor, pQuery, rootNode);
 
     TSQueryMatch match;
@@ -813,7 +839,8 @@ void CTreeSitterParser::RunTagsQuery()
             }
             else if (HasCapturePrefix(sCapture, "definition"))
             {
-                defs.push_back({ nodeStart, nodeEnd });
+                TSNode expandedNode = expandDefinitionNode(node, sCapture);
+                defs.push_back({ ts_node_start_byte(expandedNode), ts_node_end_byte(expandedNode) });
             }
             else if (HasCapturePrefix(sCapture, "reference"))
             {
@@ -840,12 +867,12 @@ void CTreeSitterParser::RunTagsQuery()
 
         for (const auto& def : defs)
         {
-            const bool useNameRange =
-                nameStart >= def.startByte && nameEnd <= def.endByte;
             m_tagDefs.push_back({
                 name,
-                useNameRange ? nameStart : def.startByte,
-                useNameRange ? nameEnd : def.endByte,
+                def.startByte,
+                def.endByte,
+                nameStart,
+                nameEnd,
             });
         }
     }
@@ -2083,6 +2110,43 @@ bool CTreeSitterParser::TryGetTagDefinitionByNameAt(ITextBuffer* pBuffer, int nL
     defStartByte = pBestDef->startByte;
     defEndByte = pBestDef->endByte;
     return true;
+}
+
+bool CTreeSitterParser::TryBuildTagRange(const TagDef& def, TagRange& tagRange) const
+{
+    int startLine = 0;
+    int startChar = 0;
+    int endLine = 0;
+    int endChar = 0;
+    if (!ByteOffsetToLineChar(def.startByte, startLine, startChar) ||
+        !ByteOffsetToLineChar(def.endByte, endLine, endChar))
+    {
+        return false;
+    }
+
+    tagRange.name = def.name;
+    tagRange.startByte = def.startByte;
+    tagRange.endByte = def.endByte;
+    tagRange.nameStartByte = def.nameStartByte;
+    tagRange.nameEndByte = def.nameEndByte;
+    tagRange.startLine = startLine;
+    tagRange.startChar = startChar;
+    tagRange.endLine = endLine;
+    tagRange.endChar = endChar;
+    return true;
+}
+
+std::vector<CTreeSitterParser::TagRange> CTreeSitterParser::GetTagRanges() const
+{
+    std::vector<TagRange> ranges;
+    ranges.reserve(m_tagDefs.size());
+    for (const auto& def : m_tagDefs)
+    {
+        TagRange range;
+        if (TryBuildTagRange(def, range))
+            ranges.push_back(range);
+    }
+    return ranges;
 }
 
 bool CTreeSitterParser::FindDefinition(ITextBuffer* pBuffer, int nLineIndex, int nCharPos, int& nDefLine, int& nDefChar) const

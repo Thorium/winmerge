@@ -204,6 +204,8 @@ protected:
 	int GetTargetPaneForSemanticMergeCommand(UINT nID) const;
 	int GetSemanticMergeDiff() const;
 	int GetSemanticMergeDiffOrSuggested(int dstPane, String& message) const;
+	void GetSemanticMergeAnchor(int nDiff, int& anchorPane, int& anchorLine) const;
+	String GetSemanticPreviewTitle(int dstPane) const;
  	bool CanSemanticMergeAllToPane(int dstPane);
 
 	// Generated message map functions

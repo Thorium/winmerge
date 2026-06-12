@@ -33,6 +33,7 @@
 #include "FindTextHelper.h"
 #include "Shell.h"
 #include "SelectPluginDlg.h"
+#include "SemanticPreviewDlg.h"
 #include "Constants.h"
 #include "MouseHook.h"
 
@@ -2357,10 +2358,15 @@ void CMergeEditView::OnSemanticMerge()
 		return;
 	}
 
+	int anchorPane = -1;
+	int anchorLine = -1;
+	GetSemanticMergeAnchor(nDiff, anchorPane, anchorLine);
+
 	String message;
-	String preview;
+	String previewHeader;
+	String previewCode;
 	CWaitCursor waitstatus;
-	if (!pDoc->PreviewSemanticMergeSuggestion(m_nThisPane, nDiff, preview, message))
+	if (!pDoc->PreviewSemanticMergeSuggestion(m_nThisPane, nDiff, previewHeader, previewCode, message, anchorPane, anchorLine, true))
 	{
 		if (!selectionMessage.empty())
 			message = selectionMessage + _T("\n\n") + message;
@@ -2368,13 +2374,14 @@ void CMergeEditView::OnSemanticMerge()
 		return;
 	}
 	if (!selectionMessage.empty())
-		preview = selectionMessage + _T("\n\n") + preview;
+		previewHeader = selectionMessage + _T("\n\n") + previewHeader;
 
-	const int userChoice = AfxMessageBox(preview.c_str(), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
-	if (userChoice != IDYES)
+	CSemanticPreviewDlg dlg(GetSemanticPreviewTitle(m_nThisPane), previewHeader, previewCode,
+		pDoc->GetSemanticPreviewFileExt(m_nThisPane), this);
+	if (dlg.DoModal() != IDOK)
 		return;
 
-	if (!pDoc->DoSemanticMergeSuggestion(m_nThisPane, nDiff, message))
+	if (!pDoc->DoSemanticMergeSuggestion(m_nThisPane, nDiff, message, anchorPane, anchorLine, true))
 	{
 		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
 		return;
@@ -2404,16 +2411,18 @@ void CMergeEditView::OnSemanticMergeAll()
 	}
 
 	String message;
-	String preview;
+	String previewHeader;
+	String previewCode;
 	CWaitCursor waitstatus;
-	if (!pDoc->PreviewAllSemanticMergeSuggestions(m_nThisPane, preview, message))
+	if (!pDoc->PreviewAllSemanticMergeSuggestions(m_nThisPane, previewHeader, previewCode, message))
 	{
 		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
 		return;
 	}
 
-	const int userChoice = AfxMessageBox(preview.c_str(), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
-	if (userChoice != IDYES)
+	CSemanticPreviewDlg dlg(GetSemanticPreviewTitle(m_nThisPane), previewHeader, previewCode,
+		pDoc->GetSemanticPreviewFileExt(m_nThisPane), this);
+	if (dlg.DoModal() != IDOK)
 		return;
 
 	if (!pDoc->DoAllSemanticMergeSuggestions(m_nThisPane, message))
@@ -2454,10 +2463,15 @@ void CMergeEditView::OnSemanticMergeToPane(UINT nID)
 		return;
 	}
 
+	int anchorPane = -1;
+	int anchorLine = -1;
+	GetSemanticMergeAnchor(nDiff, anchorPane, anchorLine);
+
 	String message;
-	String preview;
+	String previewHeader;
+	String previewCode;
 	CWaitCursor waitstatus;
-	if (!pDoc->PreviewSemanticMergeSuggestion(dstPane, nDiff, preview, message))
+	if (!pDoc->PreviewSemanticMergeSuggestion(dstPane, nDiff, previewHeader, previewCode, message, anchorPane, anchorLine, true))
 	{
 		if (!selectionMessage.empty())
 			message = selectionMessage + _T("\n\n") + message;
@@ -2465,13 +2479,14 @@ void CMergeEditView::OnSemanticMergeToPane(UINT nID)
 		return;
 	}
 	if (!selectionMessage.empty())
-		preview = selectionMessage + _T("\n\n") + preview;
+		previewHeader = selectionMessage + _T("\n\n") + previewHeader;
 
-	const int userChoice = AfxMessageBox(preview.c_str(), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
-	if (userChoice != IDYES)
+	CSemanticPreviewDlg dlg(GetSemanticPreviewTitle(dstPane), previewHeader, previewCode,
+		pDoc->GetSemanticPreviewFileExt(dstPane), this);
+	if (dlg.DoModal() != IDOK)
 		return;
 
-	if (!pDoc->DoSemanticMergeSuggestion(dstPane, nDiff, message))
+	if (!pDoc->DoSemanticMergeSuggestion(dstPane, nDiff, message, anchorPane, anchorLine, true))
 	{
 		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
 		return;
@@ -2494,7 +2509,6 @@ bool CMergeEditView::CanSemanticMergeToPane(int dstPane)
 		dstPane >= 0 &&
 		dstPane < pDoc->m_nBuffers &&
 		pDoc->IsSemanticMergeEnabled() &&
-		!pDoc->IsModified() &&
 		!IsReadOnly(dstPane);
 }
 
@@ -2523,9 +2537,15 @@ int CMergeEditView::GetSemanticMergeDiff() const
 {
 	const CMergeDoc* pDoc = GetDocument();
 
-	const int currentDiff = pDoc->GetCurrentDiff();
-	if (currentDiff != -1 && pDoc->m_diffList.IsDiffSignificant(currentDiff))
-		return currentDiff;
+	// The cursor marks where the user is working right now. The document's
+	// "current diff" is deliberately not consulted: it goes stale after an
+	// earlier (possibly cancelled) invocation, and every normal flow that
+	// selects a diff (F4/F5, clicking, the location pane) also places the
+	// cursor inside it.
+	const CEPoint pt = GetCursorPos();
+	const int diffAtCursor = pDoc->m_diffList.LineToDiff(pt.y);
+	if (diffAtCursor != -1 && pDoc->m_diffList.IsDiffSignificant(diffAtCursor))
+		return diffAtCursor;
 
 	int firstDiff = -1;
 	int lastDiff = -1;
@@ -2533,12 +2553,21 @@ int CMergeEditView::GetSemanticMergeDiff() const
 	if (firstDiff != -1 && firstDiff == lastDiff && pDoc->m_diffList.IsDiffSignificant(firstDiff))
 		return firstDiff;
 
-	const CEPoint pt = GetCursorPos();
-	const int diffAtCursor = pDoc->m_diffList.LineToDiff(pt.y);
-	if (diffAtCursor != -1 && pDoc->m_diffList.IsDiffSignificant(diffAtCursor))
-		return diffAtCursor;
-
 	return -1;
+}
+
+String CMergeEditView::GetSemanticPreviewTitle(int dstPane) const
+{
+	static const tchar_t* paneNames[] = { _T("Left"), _T("Middle"), _T("Right") };
+	return strutils::format(_T("Safe Semantic Copy to %s"), paneNames[dstPane]);
+}
+
+void CMergeEditView::GetSemanticMergeAnchor(int nDiff, int& anchorPane, int& anchorLine) const
+{
+	// The cursor marks which definition the user means; the analyzer prefers
+	// the definition under it when the diff spans several definitions.
+	anchorPane = m_nThisPane;
+	anchorLine = GetCursorPos().y;
 }
 
 int CMergeEditView::GetSemanticMergeDiffOrSuggested(int dstPane, String& message) const
@@ -2549,7 +2578,7 @@ int CMergeEditView::GetSemanticMergeDiffOrSuggested(int dstPane, String& message
 		return explicitDiff;
 
 	int suggestedDiff = -1;
-	if (GetDocument()->FindFirstSemanticMergeSuggestion(dstPane, suggestedDiff, message))
+	if (GetDocument()->FindFirstSemanticMergeSuggestion(dstPane, suggestedDiff, message, m_nThisPane, GetCursorPos().y, true))
 		return suggestedDiff;
 
 	if (message.empty())

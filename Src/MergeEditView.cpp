@@ -190,6 +190,8 @@ BEGIN_MESSAGE_MAP(CMergeEditView, CCrystalEditViewEx)
 	ON_UPDATE_COMMAND_UI(ID_SEMANTIC_MERGE_ALL, OnUpdateSemanticMergeAll)
 	ON_COMMAND_RANGE(ID_SEMANTIC_MERGE_LEFT, ID_SEMANTIC_MERGE_RIGHT, OnSemanticMergeToPane)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_SEMANTIC_MERGE_LEFT, ID_SEMANTIC_MERGE_RIGHT, OnUpdateSemanticMergeToPane)
+	ON_COMMAND(ID_SEMANTIC_MERGE_AUTO_FALLBACK, OnSemanticMergeAutoFallback)
+	ON_UPDATE_COMMAND_UI(ID_SEMANTIC_MERGE_AUTO_FALLBACK, OnUpdateSemanticMergeAutoFallback)
 	ON_COMMAND(ID_L2R, OnL2r)
 	ON_UPDATE_COMMAND_UI(ID_L2R, OnUpdateL2r)
 	ON_COMMAND(ID_LINES_L2R, OnLinesL2r)
@@ -2554,6 +2556,19 @@ int CMergeEditView::GetSemanticMergeDiff() const
 		return firstDiff;
 
 	return -1;
+}
+
+void CMergeEditView::OnSemanticMergeAutoFallback()
+{
+	GetOptionsMgr()->SaveOption(OPT_AUTO_MERGE_SEMANTIC_FALLBACK,
+		!GetOptionsMgr()->GetBool(OPT_AUTO_MERGE_SEMANTIC_FALLBACK));
+}
+
+void CMergeEditView::OnUpdateSemanticMergeAutoFallback(CCmdUI* pCmdUI)
+{
+	const CMergeDoc* pDoc = GetDocument();
+	pCmdUI->Enable(pDoc->m_nBuffers == 3 && pDoc->IsSemanticMergeEnabled());
+	pCmdUI->SetCheck(GetOptionsMgr()->GetBool(OPT_AUTO_MERGE_SEMANTIC_FALLBACK));
 }
 
 String CMergeEditView::GetSemanticPreviewTitle(int dstPane) const

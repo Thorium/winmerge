@@ -28,6 +28,7 @@ public:
 	enum { IDD = IDD_PROPPAGE_EDITOR };
 	bool    m_bHiliteSyntax;
 	bool    m_bTreeSitter;
+	bool    m_bSemanticMergeExperimental;
 	int	    m_nTabType;
 	unsigned m_nTabSize;
 	bool    m_bAllowMixedEol;

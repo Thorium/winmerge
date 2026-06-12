@@ -102,6 +102,7 @@ public:
 	bool m_bSelfCompare; /**< Compares the specified file with a copy of the file */
 	bool m_bClipboardCompare; /**< Compare text or bitmaps in the clipboard history */
 	bool m_bNewCompare; /**< Show a new blank window */
+	bool m_bForceSemanticMergeForThisRun; /**< Force-enable semantic merge for this process */
 	bool m_bEnableExitCode; /**< Returns the comparison result as a process exit code */
 	int m_nLineIndex; /**< Line number to jump after loading files */
 	int m_nCharIndex; /**< Character position to jump after loading files */
@@ -146,4 +147,3 @@ private:
 	/** Operator= is not implemented. */
 	MergeCmdLineInfo& operator=(const MergeCmdLineInfo& rhs) = delete;
 };
-

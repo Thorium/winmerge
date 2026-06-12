@@ -38,6 +38,10 @@
 #include "HexMergeView.h"
 #include "ImgMergeFrm.h"
 #include "WebPageDiffFrm.h"
+#include "UnicodeString.h"
+#include "paths.h"
+#include "Environment.h"
+#include <Windows.h>
 #include "OutputDoc.h"
 #include "OutputBar.h"
 #include "OutputView.h"
@@ -1046,31 +1050,75 @@ bool CMainFrame::ShowTextOrTableMergeDoc(std::optional<bool> table, IDirDoc * pD
 	if (pOpenParams && !pOpenParams->m_fileExt.empty())
 		pMergeDoc->SetTextType(pOpenParams->m_fileExt);
 
+	if (pOpenParams && !pOpenParams->m_strSaveAsPath.empty())
+		pMergeDoc->SetSaveAsPath(pOpenParams->m_strSaveAsPath);
+
 	for (int pane = 0; pane < nFiles; pane++)
 	{
-		if (dwFlags)
-		{
-			bool bModified = (dwFlags[pane] & FFILEOPEN_MODIFIED) > 0;
-			if (bModified)
+			if (dwFlags)
 			{
+				bool bModified = (dwFlags[pane] & FFILEOPEN_MODIFIED) > 0;
+				if (bModified)
+				{
 				pMergeDoc->m_ptBuf[pane]->SetModified(true);
 				pMergeDoc->UpdateHeaderPath(pane);
 			}
-			if (dwFlags[pane] & FFILEOPEN_AUTOMERGE)
-			{
-				pMergeDoc->DoAutoMerge(pane);
+				if (dwFlags[pane] & FFILEOPEN_AUTOMERGE)
+				{
+					pMergeDoc->DoAutoMerge(pane);
+				}
+				if (dwFlags[pane] & FFILEOPEN_SEMANTIC_AUTOMERGE)
+				{
+					bool appliedSemanticMerge = false;
+					String lastSemanticMessage;
+					String message;
+					if (pMergeDoc->DoAllSemanticMergeSuggestions(pane, message))
+					{
+						appliedSemanticMerge = true;
+						lastSemanticMessage = message;
+					}
+					else
+					{
+						if (!message.empty())
+							lastSemanticMessage = message;
+
+						const int diffCount = pMergeDoc->m_diffList.GetSize();
+						for (int nSemanticDiff = 0; nSemanticDiff < diffCount; ++nSemanticDiff)
+						{
+							if (!pMergeDoc->m_diffList.IsDiffSignificant(nSemanticDiff))
+								continue;
+
+							message.clear();
+							if (pMergeDoc->DoSemanticMergeSuggestion(pane, nSemanticDiff, message))
+							{
+								appliedSemanticMerge = true;
+								lastSemanticMessage = message;
+								break;
+							}
+							if (!message.empty())
+								lastSemanticMessage = message;
+						}
+					}
+
+					if (theApp.GetNonInteractive() && !lastSemanticMessage.empty())
+						CMergeApp::OutputConsole(lastSemanticMessage);
+
+					if (appliedSemanticMerge && !pMergeDoc->GetSaveAsPath().empty())
+					{
+						bool bSaveSuccess = false;
+						pMergeDoc->DoSave(pMergeDoc->GetPath(pane).c_str(), bSaveSuccess, pane);
+						if (theApp.GetNonInteractive())
+							CMergeApp::OutputConsole(bSaveSuccess ? _T("Semantic CLI save succeeded.") : _T("Semantic CLI save failed."));
+					}
+				}
 			}
 		}
-	}
 
 	pMergeDoc->MoveOnLoad(
 		GetActivePaneFromFlags(nFiles, dwFlags),
 		pOpenParams ? pOpenParams->m_line : -1,
 		true,
 		pOpenParams ? pOpenParams->m_char: -1);
-
-	if (pOpenParams && !pOpenParams->m_strSaveAsPath.empty())
-		pMergeDoc->SetSaveAsPath(pOpenParams->m_strSaveAsPath);
 
 	if (!sReportFile.empty())
 		pMergeDoc->GenerateReport(sReportFile);

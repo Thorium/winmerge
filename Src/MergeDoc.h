@@ -178,6 +178,11 @@ public:
 	void CopyMultiplePartialList(int srcPane, int dstPane, int activePane,
 		int firstDiff, int lastDiff, const CEPoint& ptStart, const CEPoint& ptEnd, bool bCharacter);
 	void DoAutoMerge(int dstPane);
+	bool PreviewSemanticMergeSuggestion(int dstPane, int nDiff, String& preview, String& message);
+	bool DoSemanticMergeSuggestion(int dstPane, int nDiff, String& message);
+	bool PreviewAllSemanticMergeSuggestions(int dstPane, String& preview, String& message);
+	bool DoAllSemanticMergeSuggestions(int dstPane, String& message);
+	bool FindFirstSemanticMergeSuggestion(int dstPane, int& nDiff, String& message) const;
 	bool SanityCheckDiff(const DIFFRANGE& dr) const;
 	bool HasInvisibleLines(int firstDiff, int lastDiff) const;
 	bool InlineDiffListCopy(int srcPane, int dstPane, int nDiff, int nFirstWordDiff, int nLastWordDiff, const std::vector<int>* pWordDiffIndice, bool bGroupWithPrevious = false, bool bUpdateView = true);
@@ -205,6 +210,7 @@ public:
 	CTreeSitterParser* GetTreeSitterParser(int nBuffer) { return m_pTreeSitterParsers[nBuffer].get(); }
 	CrystalLineParser::TextDefinition* GetTreeSitterTextDefinition(int nBuffer) { return m_pTreeSitterTextDefs[nBuffer].get(); }
 	bool IsTreeSitterEnabled() const;
+	bool IsSemanticMergeEnabled() const;
 	void UpdateTreeSitterSupport();
 	void AddMergeViews(CMergeEditSplitterView* pMergeEditSplitterView, CMergeEditView* pView[3]);
 	void RemoveMergeViews(CMergeEditSplitterView* pMergeEditSplitterView);

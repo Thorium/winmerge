@@ -312,6 +312,11 @@ BOOL CMergeApp::InitInstance()
 
 	Options::Init(m_pOptions.get()); // Implementation in OptionsInit.cpp
 	ApplyCommandLineConfigOptions(cmdInfo);
+	if (cmdInfo.m_bForceSemanticMergeForThisRun)
+	{
+		GetOptionsMgr()->Set(OPT_TREE_SITTER, true);
+		GetOptionsMgr()->Set(OPT_SEMANTIC_MERGE_EXPERIMENTAL, true);
+	}
 	if (cmdInfo.m_sErrorMessages.size() > 0)
 	{
 		for (auto& msg : cmdInfo.m_sErrorMessages)
@@ -1692,4 +1697,3 @@ void CMergeApp::ReloadCustomSysColors()
 	afxData.hbrWindowFrame = ::GetSysColorBrush(COLOR_WINDOWFRAME);
 	BCMenu::RecreateRadioDotBitmap();
 }
-

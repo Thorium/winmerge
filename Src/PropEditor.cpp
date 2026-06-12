@@ -25,6 +25,7 @@ PropEditor::PropEditor(COptionsMgr *optionsMgr)
 : OptionsPanel(optionsMgr, PropEditor::IDD)
 , m_bHiliteSyntax(false)
 , m_bTreeSitter(false)
+, m_bSemanticMergeExperimental(false)
 , m_nTabType(-1)
 , m_nTabSize(0)
 , m_bAllowMixedEol(false)
@@ -35,6 +36,7 @@ PropEditor::PropEditor(COptionsMgr *optionsMgr)
 	BindOption(OPT_TAB_TYPE, m_nTabType, IDC_PROP_INSERT_TABS, DDX_Radio);
 	BindOption(OPT_SYNTAX_HIGHLIGHT, m_bHiliteSyntax, IDC_HILITE_CHECK, DDX_Check);
 	BindOption(OPT_TREE_SITTER, m_bTreeSitter, IDC_TREE_SITTER_CHECK, DDX_Check);
+	BindOption(OPT_SEMANTIC_MERGE_EXPERIMENTAL, m_bSemanticMergeExperimental, IDC_SEMANTIC_MERGE_CHECK, DDX_Check);
 	BindOption(OPT_ALLOW_MIXED_EOL, m_bAllowMixedEol, IDC_MIXED_EOL, DDX_Check);
 	BindOptionCustom(OPT_RENDERING_MODE, m_nRenderingMode, IDC_RENDERING_MODE, DDX_CBIndex,
 		+[](int v) { return v + 1; }, +[](int v) { return (v - 1); });

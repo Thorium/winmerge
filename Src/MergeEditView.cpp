@@ -183,6 +183,12 @@ BEGIN_MESSAGE_MAP(CMergeEditView, CCrystalEditViewEx)
 	ON_UPDATE_COMMAND_UI(ID_ALL_RIGHT, OnUpdateAllRight)
 	ON_COMMAND(ID_AUTO_MERGE, OnAutoMerge)
 	ON_UPDATE_COMMAND_UI(ID_AUTO_MERGE, OnUpdateAutoMerge)
+	ON_COMMAND(ID_SEMANTIC_MERGE, OnSemanticMerge)
+	ON_UPDATE_COMMAND_UI(ID_SEMANTIC_MERGE, OnUpdateSemanticMerge)
+	ON_COMMAND(ID_SEMANTIC_MERGE_ALL, OnSemanticMergeAll)
+	ON_UPDATE_COMMAND_UI(ID_SEMANTIC_MERGE_ALL, OnUpdateSemanticMergeAll)
+	ON_COMMAND_RANGE(ID_SEMANTIC_MERGE_LEFT, ID_SEMANTIC_MERGE_RIGHT, OnSemanticMergeToPane)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_SEMANTIC_MERGE_LEFT, ID_SEMANTIC_MERGE_RIGHT, OnUpdateSemanticMergeToPane)
 	ON_COMMAND(ID_L2R, OnL2r)
 	ON_UPDATE_COMMAND_UI(ID_L2R, OnUpdateL2r)
 	ON_COMMAND(ID_LINES_L2R, OnLinesL2r)
@@ -2332,6 +2338,223 @@ void CMergeEditView::OnUpdateAutoMerge(CCmdUI* pCmdUI)
 		!GetDocument()->IsModified() && 
 		!GetDocument()->GetAutoMerged() && 
 		QueryEditable());
+}
+
+void CMergeEditView::OnSemanticMerge()
+{
+	CMergeDoc* pDoc = GetDocument();
+	if (!CanSemanticMergeToPane(m_nThisPane))
+	{
+		AfxMessageBox(_("Safe semantic copy is not available for the current pane.").c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	String selectionMessage;
+	int nDiff = GetSemanticMergeDiffOrSuggested(m_nThisPane, selectionMessage);
+	if (nDiff < 0)
+	{
+		AfxMessageBox(selectionMessage.c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	String message;
+	String preview;
+	CWaitCursor waitstatus;
+	if (!pDoc->PreviewSemanticMergeSuggestion(m_nThisPane, nDiff, preview, message))
+	{
+		if (!selectionMessage.empty())
+			message = selectionMessage + _T("\n\n") + message;
+		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+		return;
+	}
+	if (!selectionMessage.empty())
+		preview = selectionMessage + _T("\n\n") + preview;
+
+	const int userChoice = AfxMessageBox(preview.c_str(), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+	if (userChoice != IDYES)
+		return;
+
+	if (!pDoc->DoSemanticMergeSuggestion(m_nThisPane, nDiff, message))
+	{
+		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+}
+
+void CMergeEditView::OnUpdateSemanticMerge(CCmdUI* pCmdUI)
+{
+	if (GetDocument()->m_nBuffers == 3)
+	{
+		static const TCHAR* paneNames[] = { _T("Left"), _T("Middle"), _T("Right") };
+		String text = strutils::format(_T("Safe Semantic Copy to %s\tCtrl+Alt+Shift+M"), paneNames[m_nThisPane]);
+		pCmdUI->SetText(text.c_str());
+	}
+	pCmdUI->Enable(CanSemanticMergeToPane(m_nThisPane));
+}
+
+void CMergeEditView::OnSemanticMergeAll()
+{
+	CMergeDoc* pDoc = GetDocument();
+	if (!CanSemanticMergeAllToPane(m_nThisPane))
+	{
+		AfxMessageBox(_("Safe semantic copy is not available for the current pane.").c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	String message;
+	String preview;
+	CWaitCursor waitstatus;
+	if (!pDoc->PreviewAllSemanticMergeSuggestions(m_nThisPane, preview, message))
+	{
+		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	const int userChoice = AfxMessageBox(preview.c_str(), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+	if (userChoice != IDYES)
+		return;
+
+	if (!pDoc->DoAllSemanticMergeSuggestions(m_nThisPane, message))
+	{
+		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+}
+
+void CMergeEditView::OnUpdateSemanticMergeAll(CCmdUI* pCmdUI)
+{
+	if (GetDocument()->m_nBuffers == 3)
+	{
+		static const TCHAR* paneNames[] = { _T("Left"), _T("Middle"), _T("Right") };
+		String text = strutils::format(_T("Safe Semantic Copy All to %s\tCtrl+Alt+Shift+A"), paneNames[m_nThisPane]);
+		pCmdUI->SetText(text.c_str());
+	}
+	pCmdUI->Enable(CanSemanticMergeAllToPane(m_nThisPane));
+}
+
+void CMergeEditView::OnSemanticMergeToPane(UINT nID)
+{
+	const int dstPane = GetTargetPaneForSemanticMergeCommand(nID);
+	if (!CanSemanticMergeToPane(dstPane))
+	{
+		AfxMessageBox(_("Safe semantic copy is not available for that destination pane.").c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	CMergeDoc* pDoc = GetDocument();
+	String selectionMessage;
+	int nDiff = GetSemanticMergeDiffOrSuggested(dstPane, selectionMessage);
+	if (nDiff < 0)
+	{
+		AfxMessageBox(selectionMessage.c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	String message;
+	String preview;
+	CWaitCursor waitstatus;
+	if (!pDoc->PreviewSemanticMergeSuggestion(dstPane, nDiff, preview, message))
+	{
+		if (!selectionMessage.empty())
+			message = selectionMessage + _T("\n\n") + message;
+		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+		return;
+	}
+	if (!selectionMessage.empty())
+		preview = selectionMessage + _T("\n\n") + preview;
+
+	const int userChoice = AfxMessageBox(preview.c_str(), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+	if (userChoice != IDYES)
+		return;
+
+	if (!pDoc->DoSemanticMergeSuggestion(dstPane, nDiff, message))
+	{
+		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+		return;
+	}
+
+	AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+}
+
+void CMergeEditView::OnUpdateSemanticMergeToPane(CCmdUI* pCmdUI)
+{
+	const int dstPane = GetTargetPaneForSemanticMergeCommand(pCmdUI->m_nID);
+	pCmdUI->Enable(CanSemanticMergeToPane(dstPane));
+}
+
+bool CMergeEditView::CanSemanticMergeToPane(int dstPane)
+{
+	const CMergeDoc* pDoc = GetDocument();
+	return
+		pDoc->m_nBuffers == 3 &&
+		dstPane >= 0 &&
+		dstPane < pDoc->m_nBuffers &&
+		pDoc->IsSemanticMergeEnabled() &&
+		!pDoc->IsModified() &&
+		!IsReadOnly(dstPane);
+}
+
+bool CMergeEditView::CanSemanticMergeAllToPane(int dstPane)
+{
+	return CanSemanticMergeToPane(dstPane);
+}
+
+int CMergeEditView::GetTargetPaneForSemanticMergeCommand(UINT nID) const
+{
+	switch (nID)
+	{
+	case ID_SEMANTIC_MERGE_LEFT:
+		return 0;
+	case ID_SEMANTIC_MERGE_MIDDLE:
+		return 1;
+	case ID_SEMANTIC_MERGE_RIGHT:
+		return 2;
+	case ID_SEMANTIC_MERGE:
+	default:
+		return m_nThisPane;
+	}
+}
+
+int CMergeEditView::GetSemanticMergeDiff() const
+{
+	const CMergeDoc* pDoc = GetDocument();
+
+	const int currentDiff = pDoc->GetCurrentDiff();
+	if (currentDiff != -1 && pDoc->m_diffList.IsDiffSignificant(currentDiff))
+		return currentDiff;
+
+	int firstDiff = -1;
+	int lastDiff = -1;
+	const_cast<CMergeEditView*>(this)->GetSelectedDiffs(firstDiff, lastDiff);
+	if (firstDiff != -1 && firstDiff == lastDiff && pDoc->m_diffList.IsDiffSignificant(firstDiff))
+		return firstDiff;
+
+	const CEPoint pt = GetCursorPos();
+	const int diffAtCursor = pDoc->m_diffList.LineToDiff(pt.y);
+	if (diffAtCursor != -1 && pDoc->m_diffList.IsDiffSignificant(diffAtCursor))
+		return diffAtCursor;
+
+	return -1;
+}
+
+int CMergeEditView::GetSemanticMergeDiffOrSuggested(int dstPane, String& message) const
+{
+	message.clear();
+	const int explicitDiff = GetSemanticMergeDiff();
+	if (explicitDiff != -1)
+		return explicitDiff;
+
+	int suggestedDiff = -1;
+	if (GetDocument()->FindFirstSemanticMergeSuggestion(dstPane, suggestedDiff, message))
+		return suggestedDiff;
+
+	if (message.empty())
+		message = _("Select a conflict or difference first, or use Safe Semantic Copy All to Current Pane.");
+	return -1;
 }
 
 /**

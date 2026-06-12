@@ -55,6 +55,10 @@
 #include "DiffContext.h"
 #include "Logger.h"
 #include "SyntaxParserRegistry.h"
+#include "SemanticMergeAnalyzer.h"
+#include "TreeSitterParser.h"
+#include <algorithm>
+#include <unordered_map>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -65,6 +69,315 @@ using std::swap;
 int CMergeDoc::m_nBuffersTemp = 2;
 
 static int SaveBuffForDiff(CDiffTextBuffer & buf, const String& filepath, int nStartLine = 0, int nLines = -1);
+
+namespace
+{
+
+/** @brief Adapts CDiffTextBuffer to the analyzer's read-only text interface. */
+class DiffTextBufferSource : public SemanticMerge::ITextSource
+{
+public:
+	explicit DiffTextBufferSource(const CDiffTextBuffer& buf) : m_buf(buf) {}
+	int GetLineCount() const override { return m_buf.GetLineCount(); }
+	int GetLineLength(int nLine) const override { return m_buf.GetLineLength(nLine); }
+	void GetTextRange(int nStartLine, int nStartChar, int nEndLine, int nEndChar, String& text) const override
+	{
+		m_buf.GetTextWithoutEmptys(nStartLine, nStartChar, nEndLine, nEndChar, text, CRLFSTYLE::AUTOMATIC, false);
+	}
+	String GetLineEol(int nLine) const override { return m_buf.GetLineEol(nLine); }
+
+private:
+	const CDiffTextBuffer& m_buf;
+};
+
+struct SemanticMergeInputs
+{
+	std::unique_ptr<DiffTextBufferSource> sources[3];
+	SemanticMerge::PaneData panes[3];
+	SemanticMerge::LanguageTraits traits;
+};
+
+void BuildSemanticMergeInputs(CMergeDoc& doc, SemanticMergeInputs& inputs)
+{
+	for (int pane = 0; pane < doc.m_nBuffers; ++pane)
+	{
+		CTreeSitterParser* pParser = doc.GetTreeSitterParser(pane);
+		inputs.sources[pane] = std::make_unique<DiffTextBufferSource>(*doc.m_ptBuf[pane]);
+		inputs.panes[pane].pText = inputs.sources[pane].get();
+		inputs.panes[pane].hasLanguage = pParser != nullptr && pParser->HasLanguage();
+		if (inputs.panes[pane].hasLanguage)
+		{
+			inputs.panes[pane].tags = pParser->GetTagRanges();
+			if (const CTreeSitterLanguage* pLang = pParser->GetLanguage())
+				inputs.traits = SemanticMerge::TraitsForLanguage(pLang->GetName());
+		}
+	}
+}
+
+bool CheckSemanticMergePreconditions(const CMergeDoc& doc, int dstPane, String& message)
+{
+	if (!doc.IsSemanticMergeEnabled())
+	{
+		message = _("Experimental semantic merge suggestions are disabled.");
+		return false;
+	}
+
+	if (doc.m_nBuffers != 3)
+	{
+		message = _("Semantic merge suggestions currently support only 3-way text comparisons.");
+		return false;
+	}
+
+	if (dstPane < 0 || dstPane >= doc.m_nBuffers || doc.GetReadOnly(dstPane))
+	{
+		message = _("The destination pane is read-only.");
+		return false;
+	}
+
+	return true;
+}
+
+SemanticMerge::DiffInfo MakeSemanticDiffInfo(const DIFFRANGE& dr)
+{
+	SemanticMerge::DiffInfo diff;
+	diff.dbegin = dr.dbegin;
+	diff.dend = dr.dend;
+	diff.op = dr.op;
+	return diff;
+}
+
+bool TryBuildSemanticSuggestion(CMergeDoc& doc, int dstPane, int nDiff, SemanticMerge::Suggestion& suggestion, String& message)
+{
+	message.clear();
+	if (!CheckSemanticMergePreconditions(doc, dstPane, message))
+		return false;
+
+	if (nDiff < 0 || nDiff >= doc.m_diffList.GetSize())
+	{
+		message = _("Select a valid difference first.");
+		return false;
+	}
+
+	const DIFFRANGE* pDiff = doc.m_diffList.DiffRangeAt(nDiff);
+	if (pDiff == nullptr)
+	{
+		message = _("The selected difference is not available.");
+		return false;
+	}
+
+	SemanticMergeInputs inputs;
+	BuildSemanticMergeInputs(doc, inputs);
+	SemanticMerge::Analyzer analyzer(inputs.panes, doc.m_nBuffers, inputs.traits);
+	return analyzer.TryBuildSuggestion(dstPane, MakeSemanticDiffInfo(*pDiff), suggestion, message);
+}
+
+bool TryCollectSemanticSuggestions(CMergeDoc& doc, int dstPane, std::vector<SemanticMerge::Suggestion>& suggestions, String& message)
+{
+	suggestions.clear();
+	message.clear();
+	if (!CheckSemanticMergePreconditions(doc, dstPane, message))
+		return false;
+
+	std::vector<SemanticMerge::DiffInfo> diffs;
+	for (int nDiff = 0; nDiff < doc.m_diffList.GetSize(); ++nDiff)
+	{
+		if (!doc.m_diffList.IsDiffSignificant(nDiff))
+			continue;
+		const DIFFRANGE* pDiff = doc.m_diffList.DiffRangeAt(nDiff);
+		if (pDiff != nullptr)
+			diffs.push_back(MakeSemanticDiffInfo(*pDiff));
+	}
+
+	SemanticMergeInputs inputs;
+	BuildSemanticMergeInputs(doc, inputs);
+	SemanticMerge::Analyzer analyzer(inputs.panes, doc.m_nBuffers, inputs.traits);
+	return analyzer.TryCollectSuggestions(dstPane, diffs, suggestions, message);
+}
+
+bool ReplaceDefinitionText(CMergeDoc& doc, int dstPane, const SemanticMerge::TagRange& dstTag, const String& replacement)
+{
+	CDiffTextBuffer& dbuf = *doc.m_ptBuf[dstPane];
+	CCrystalTextView* pSource = doc.GetActiveMergeGroupView(dstPane);
+	if (!pSource)
+		return false;
+
+	if (dstTag.startLine < 0 || dstTag.endLine < dstTag.startLine || dstTag.endLine >= dbuf.GetLineCount())
+		return false;
+	if (dstTag.startChar < 0 || dstTag.startChar > dbuf.GetLineLength(dstTag.startLine) ||
+		dstTag.endChar < 0 || dstTag.endChar > dbuf.GetLineLength(dstTag.endLine))
+		return false;
+
+	dbuf.DeleteText(pSource, dstTag.startLine, dstTag.startChar, dstTag.endLine, dstTag.endChar, CE_ACTION_MERGE);
+
+	if (replacement.empty())
+		return true;
+
+	int endLine = 0;
+	int endChar = 0;
+	return dbuf.InsertText(pSource, dstTag.startLine, dstTag.startChar, replacement.c_str(), replacement.length(), endLine, endChar, CE_ACTION_MERGE);
+}
+
+bool InsertDefinitionText(CMergeDoc& doc, int dstPane, int line, int ch, const String& replacement)
+{
+	CDiffTextBuffer& dbuf = *doc.m_ptBuf[dstPane];
+	CCrystalTextView* pSource = doc.GetActiveMergeGroupView(dstPane);
+	if (!pSource)
+		return false;
+	if (line < 0 || line >= dbuf.GetLineCount())
+		return false;
+	if (ch < 0 || ch > dbuf.GetLineLength(line))
+		return false;
+
+	int endLine = 0;
+	int endChar = 0;
+	return dbuf.InsertText(pSource, line, ch, replacement.c_str(), replacement.length(), endLine, endChar, CE_ACTION_MERGE);
+}
+
+}
+
+bool CMergeDoc::IsTreeSitterEnabled() const
+{
+	return GetOptionsMgr()->GetInt(OPT_TREE_SITTER_MODE) != 0;
+}
+
+CTreeSitterParser* CMergeDoc::GetTreeSitterParser(int nBuffer)
+{
+	// The rewritten architecture owns the parser at the view level (created
+	// lazily from the view's resolved language and bound to the pane buffer),
+	// so route through the view instead of a per-document parser member.
+	CMergeEditView* pView = GetView(0, nBuffer);
+	return pView ? pView->GetTreeSitterParser() : nullptr;
+}
+
+bool CMergeDoc::IsSemanticMergeEnabled() const
+{
+	return GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE_EXPERIMENTAL) && IsTreeSitterEnabled();
+}
+
+bool CMergeDoc::PreviewSemanticMergeSuggestion(int dstPane, int nDiff, String& preview, String& message)
+{
+	preview.clear();
+	SemanticMerge::Suggestion suggestion;
+	if (!TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message))
+		return false;
+
+	preview = strutils::format_string1(
+		_("Definition: %1\n\nThe semantic merge suggestion will replace the destination definition with the proposed safe merged result.\n\nProposed definition preview:\n"),
+		suggestion.displayName);
+	preview += _T("----------------------------------------\n");
+	preview += suggestion.previewText;
+	return true;
+}
+
+bool CMergeDoc::DoSemanticMergeSuggestion(int dstPane, int nDiff, String& message)
+{
+	SemanticMerge::Suggestion suggestion;
+	if (!TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message))
+		return false;
+
+	const bool bOldEnableRescan = m_bEnableRescan;
+	m_bEnableRescan = false;
+	SetEditedAfterRescan(dstPane);
+	const bool applied = suggestion.insertOnly ?
+		InsertDefinitionText(*this, dstPane, suggestion.insertLine, suggestion.insertChar, suggestion.replacementText) :
+		ReplaceDefinitionText(*this, dstPane, suggestion.defs[dstPane].tag, suggestion.replacementText);
+	if (!applied)
+	{
+		m_bEnableRescan = bOldEnableRescan;
+		message = _("Failed to apply the semantic merge suggestion.");
+		return false;
+	}
+
+	m_bEnableRescan = bOldEnableRescan;
+	FlushAndRescan();
+	UpdateHeaderPath(dstPane);
+	message = strutils::format_string1(
+		_("Applied semantic merge suggestion for definition '%1'."),
+		suggestion.displayName);
+	return true;
+}
+
+bool CMergeDoc::FindFirstSemanticMergeSuggestion(int dstPane, int& nDiff, String& message) const
+{
+	nDiff = -1;
+	message.clear();
+	String lastMessage;
+	for (int candidateDiff = 0; candidateDiff < m_diffList.GetSize(); ++candidateDiff)
+	{
+		if (!m_diffList.IsDiffSignificant(candidateDiff))
+			continue;
+
+		SemanticMerge::Suggestion suggestion;
+		String candidateMessage;
+		if (TryBuildSemanticSuggestion(*const_cast<CMergeDoc*>(this), dstPane, candidateDiff, suggestion, candidateMessage))
+		{
+			nDiff = candidateDiff;
+			message = strutils::format_string1(
+				_("No explicit diff was selected, so WinMerge chose the first safe semantic candidate in difference %1."),
+				strutils::to_str(m_diffList.GetSignificantIndex(candidateDiff) + 1));
+			return true;
+		}
+
+		if (!candidateMessage.empty())
+			lastMessage = candidateMessage;
+	}
+
+	message = !lastMessage.empty() ? lastMessage : _("No safe semantic copy suggestion is available for the destination pane.");
+	return false;
+}
+
+bool CMergeDoc::PreviewAllSemanticMergeSuggestions(int dstPane, String& preview, String& message)
+{
+	preview.clear();
+	std::vector<SemanticMerge::Suggestion> suggestions;
+	if (!TryCollectSemanticSuggestions(*this, dstPane, suggestions, message))
+		return false;
+
+	preview = strutils::format_string1(
+		_("Safe semantic copy found %1 definition updates for the destination pane.\n\nProposed definitions:\n"),
+		strutils::to_str(suggestions.size()));
+	for (size_t i = 0; i < suggestions.size(); ++i)
+	{
+		preview += _T("----------------------------------------\n");
+		preview += suggestions[i].displayName;
+		preview += _T("\n");
+		preview += suggestions[i].previewText;
+		if (i + 1 < suggestions.size())
+			preview += _T("\n\n");
+	}
+	return true;
+}
+
+bool CMergeDoc::DoAllSemanticMergeSuggestions(int dstPane, String& message)
+{
+	std::vector<SemanticMerge::Suggestion> suggestions;
+	if (!TryCollectSemanticSuggestions(*this, dstPane, suggestions, message))
+		return false;
+
+	const bool bOldEnableRescan = m_bEnableRescan;
+	m_bEnableRescan = false;
+	SetEditedAfterRescan(dstPane);
+	for (const auto& suggestion : suggestions)
+	{
+		const bool applied = suggestion.insertOnly ?
+			InsertDefinitionText(*this, dstPane, suggestion.insertLine, suggestion.insertChar, suggestion.replacementText) :
+			ReplaceDefinitionText(*this, dstPane, suggestion.defs[dstPane].tag, suggestion.replacementText);
+		if (!applied)
+		{
+			m_bEnableRescan = bOldEnableRescan;
+			message = _("Failed to apply one of the whole-file semantic merge suggestions.");
+			return false;
+		}
+	}
+
+	m_bEnableRescan = bOldEnableRescan;
+	FlushAndRescan();
+	UpdateHeaderPath(dstPane);
+	message = strutils::format_string1(
+		_("Applied %1 safe semantic copy suggestions to the destination pane."),
+		strutils::to_str(suggestions.size()));
+	return true;
+}
 
 /////////////////////////////////////////////////////////////////////////////
 // CMergeDoc
@@ -1965,6 +2278,27 @@ bool CMergeDoc::PromptAndSaveIfNeeded(bool bAllowCancel)
 	}
 	if (!bModified[0] && !bModified[1] && !bModified[2])
 		 return true;
+
+	if (theApp.GetNonInteractive() && !m_strSaveAsPath.empty())
+	{
+		int modifiedPane = -1;
+		for (int i = 0; i < m_nBuffers; ++i)
+		{
+			if (!bModified[i])
+				continue;
+			if (modifiedPane != -1)
+				return false;
+			modifiedPane = i;
+		}
+
+		if (modifiedPane == -1)
+			return true;
+
+		if (!DoSave(m_filePaths[modifiedPane].c_str(), bSaveSuccess[modifiedPane], modifiedPane) || !bSaveSuccess[modifiedPane])
+			return false;
+
+		return true;
+	}
 
 	bool result = SaveClosingDlg::ShowAndSave(
 		m_nBuffers,

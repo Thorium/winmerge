@@ -115,6 +115,7 @@ struct CurrentWordDiff
 struct IDirDoc;
 struct DiffFileInfo;
 class CMergeEditView;
+class CTreeSitterParser;
 class PackingInfo;
 class PrediffingInfo;
 class CMergeEditFrame;
@@ -175,6 +176,11 @@ public:
 	void CopyMultiplePartialList(int srcPane, int dstPane, int activePane,
 		int firstDiff, int lastDiff, const CEPoint& ptStart, const CEPoint& ptEnd, bool bCharacter);
 	void DoAutoMerge(int dstPane);
+	bool PreviewSemanticMergeSuggestion(int dstPane, int nDiff, String& preview, String& message);
+	bool DoSemanticMergeSuggestion(int dstPane, int nDiff, String& message);
+	bool PreviewAllSemanticMergeSuggestions(int dstPane, String& preview, String& message);
+	bool DoAllSemanticMergeSuggestions(int dstPane, String& message);
+	bool FindFirstSemanticMergeSuggestion(int dstPane, int& nDiff, String& message) const;
 	bool SanityCheckDiff(const DIFFRANGE& dr) const;
 	bool HasInvisibleLines(int firstDiff, int lastDiff) const;
 	bool InlineDiffListCopy(int srcPane, int dstPane, int nDiff, int nFirstWordDiff, int nLastWordDiff, const std::vector<int>* pWordDiffIndice, bool bGroupWithPrevious = false, bool bUpdateView = true);
@@ -199,6 +205,9 @@ public:
 	void GetPrediffer(PrediffingInfo* infoPrediffer) const;
 	const PrediffingInfo* GetPrediffer() const override;
 	const EditorScriptInfo* GetEditorScript() const override { return &m_editorScriptInfo; };
+	CTreeSitterParser* GetTreeSitterParser(int nBuffer);
+	bool IsTreeSitterEnabled() const;
+	bool IsSemanticMergeEnabled() const;
 	void AddMergeViews(CMergeEditSplitterView* pMergeEditSplitterView, CMergeEditView* pView[3]);
 	void RemoveMergeViews(CMergeEditSplitterView* pMergeEditSplitterView);
 	void SetLocationView(CLocationView* pLocationView) { m_pLocationView = pLocationView; }

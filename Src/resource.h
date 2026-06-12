@@ -246,6 +246,7 @@
 #define IDC_COMPANY                     1021
 #define IDC_GNU_ASCII                   1022
 #define IDC_TREE_SITTER_MODE            1023
+#define IDC_SEMANTIC_MERGE_CHECK        1024
 #define IDC_HILITE_CHECK                1025
 #define IDC_IGNOREREGEXP                1026
 #define IDC_ALL_WHITE                   1027
@@ -886,6 +887,11 @@
 #define ID_ALL_RIGHT                    32856
 #define ID_ALL_LEFT                     32857
 #define ID_AUTO_MERGE                   32858
+#define ID_SEMANTIC_MERGE               32891
+#define ID_SEMANTIC_MERGE_LEFT          32892
+#define ID_SEMANTIC_MERGE_MIDDLE        32893
+#define ID_SEMANTIC_MERGE_RIGHT         32894
+#define ID_SEMANTIC_MERGE_ALL           32895
 #define ID_MERGE_DELETE                 32859
 #define ID_TOOLS_CUSTOMIZECOLUMNS       32860
 #define ID_TOOLS_GENERATEPATCH          32861

@@ -204,7 +204,7 @@ CTreeSitterLanguage::~CTreeSitterLanguage()
 	if (m_pInjectionQuery)
 		ts_query_delete(m_pInjectionQuery);
 	if (m_hDll)
-		FreeLibrary(m_hDll);
+		FreeLibrary(static_cast<HMODULE>(m_hDll));
 }
 
 TSQuery* CTreeSitterLanguage::LoadQuery(const std::wstring& sPath)
@@ -260,10 +260,10 @@ bool CTreeSitterLanguage::Load(const std::wstring& sGrammarDir, const std::wstri
 
 	typedef const TSLanguage* (*TSLanguageFunc)();
 	TSLanguageFunc pfnLanguage = reinterpret_cast<TSLanguageFunc>(
-		GetProcAddress(m_hDll, sFuncName.c_str()));
+		GetProcAddress(static_cast<HMODULE>(m_hDll), sFuncName.c_str()));
 	if (!pfnLanguage)
 	{
-		FreeLibrary(m_hDll);
+		FreeLibrary(static_cast<HMODULE>(m_hDll));
 		m_hDll = nullptr;
 		return false;
 	}
@@ -271,7 +271,7 @@ bool CTreeSitterLanguage::Load(const std::wstring& sGrammarDir, const std::wstri
 	m_pLanguage = pfnLanguage();
 	if (!m_pLanguage)
 	{
-		FreeLibrary(m_hDll);
+		FreeLibrary(static_cast<HMODULE>(m_hDll));
 		m_hDll = nullptr;
 		return false;
 	}

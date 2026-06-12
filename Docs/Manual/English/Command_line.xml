@@ -103,6 +103,12 @@
 
       <arg choice="opt" rep="norepeat"><option>/ar</option></arg>
 
+      <arg choice="opt" rep="norepeat"><option>/sml</option></arg>
+
+      <arg choice="opt" rep="norepeat"><option>/smm</option></arg>
+
+      <arg choice="opt" rep="norepeat"><option>/smr</option></arg>
+
       <arg choice="opt" rep="norepeat"><option>/noninteractive</option></arg>
 
       <arg choice="opt" rep="norepeat"><option>/noprefs</option></arg>
@@ -520,6 +526,27 @@
       <term><option>/ar</option></term>
       <listitem>
         <para>Auto-merges at the right side at startup.</para>
+      </listitem>
+    </varlistentry>
+
+    <varlistentry>
+      <term><option>/sml</option></term>
+      <listitem>
+        <para>Runs the experimental semantic auto-merge loop at startup and applies safe semantic suggestions into the left side. This switch force-enables the experimental semantic merge option for the current process only.</para>
+      </listitem>
+    </varlistentry>
+
+    <varlistentry>
+      <term><option>/smm</option></term>
+      <listitem>
+        <para>Runs the experimental semantic auto-merge loop at startup and applies safe semantic suggestions into the middle side. This switch force-enables the experimental semantic merge option for the current process only.</para>
+      </listitem>
+    </varlistentry>
+
+    <varlistentry>
+      <term><option>/smr</option></term>
+      <listitem>
+        <para>Runs the experimental semantic auto-merge loop at startup and applies safe semantic suggestions into the right side. This switch force-enables the experimental semantic merge option for the current process only.</para>
       </listitem>
     </varlistentry>
 

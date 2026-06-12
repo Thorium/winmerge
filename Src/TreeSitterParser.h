@@ -138,7 +138,7 @@ private:
 	/** @brief Helper to load and compile a .scm query file. */
 	TSQuery* LoadQuery(const std::wstring& sPath);
 
-	HMODULE           m_hDll;
+	void*             m_hDll; /**< Grammar DLL handle (HMODULE; void* keeps this header windows.h-free) */
 	const TSLanguage* m_pLanguage;
 	TSQuery*          m_pHighlightQuery;
 	TSQuery*          m_pLocalsQuery;
@@ -269,6 +269,9 @@ public:
 
 	/** @brief Check if a language is set. */
 	bool HasLanguage() const { return m_pLang != nullptr; }
+
+	/** @brief Get the loaded grammar, or nullptr if none is set. */
+	const CTreeSitterLanguage* GetLanguage() const { return m_pLang; }
 
 	/**
 	 * @brief Get the node type name at a specific position.

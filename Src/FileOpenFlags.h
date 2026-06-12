@@ -16,4 +16,5 @@ enum : fileopenflags_t
 	FFILEOPEN_PROJECT = 0x0020, /**< Path is read from project-file */
 	FFILEOPEN_SETFOCUS = 0x0040, /**< Set focus to this pane */
 	FFILEOPEN_AUTOMERGE = 0x0080, /**< auto-merge at this pane */
+	FFILEOPEN_SEMANTIC_AUTOMERGE = 0x0100, /**< experimental semantic auto-merge at this pane */
 };

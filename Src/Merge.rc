@@ -108,6 +108,15 @@ BEGIN
         MENUITEM "Copy Selected Diff (Right) to Clipboard\tCtrl+&3", ID_SEL_DIFF_COPY_3RD
         MENUITEM SEPARATOR
         MENUITEM "Select Line &Difference\tF4", ID_SELECTLINEDIFF
+        POPUP "Safe Semantic Cop&y"
+        BEGIN
+            MENUITEM "To &Left",                    ID_SEMANTIC_MERGE_LEFT
+            MENUITEM "To &Middle",                  ID_SEMANTIC_MERGE_MIDDLE
+            MENUITEM "To &Right",                   ID_SEMANTIC_MERGE_RIGHT
+            MENUITEM SEPARATOR
+            MENUITEM "To Current Pane\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
+            MENUITEM "All to Current Pane\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
+        END
         POPUP "Add to &Filters"
         BEGIN
             MENUITEM "Add to &Display Filter",      ID_ADD_TO_DISPLAY_FILTERS
@@ -861,6 +870,15 @@ BEGIN
         MENUITEM "Cop&y All to Left",           ID_ALL_LEFT
         MENUITEM SEPARATOR
         MENUITEM "A&uto Merge\tCtrl+Alt+M",     ID_AUTO_MERGE
+        POPUP "Safe Semantic Cop&y"
+        BEGIN
+            MENUITEM "To &Left",                    ID_SEMANTIC_MERGE_LEFT
+            MENUITEM "To &Middle",                  ID_SEMANTIC_MERGE_MIDDLE
+            MENUITEM "To &Right",                   ID_SEMANTIC_MERGE_RIGHT
+            MENUITEM SEPARATOR
+            MENUITEM "To Current Pane\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
+            MENUITEM "All to Current Pane\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
+        END
         MENUITEM SEPARATOR
         MENUITEM "Add &Synchronization Point\tAlt+S", ID_ADD_SYNCPOINT
         MENUITEM "Clear Sync&hronization Points", ID_CLEAR_SYNCPOINTS
@@ -2118,6 +2136,7 @@ BEGIN
     "L",            ID_VIEW_DISPLAY_FILTER_BAR, VIRTKEY, SHIFT, CONTROL, NOINVERT
     "M",            ID_EDIT_MARK,           VIRTKEY, SHIFT, CONTROL, NOINVERT
     "M",            ID_AUTO_MERGE,          VIRTKEY, CONTROL, ALT, NOINVERT
+    "M",            ID_SEMANTIC_MERGE,      VIRTKEY, SHIFT, CONTROL, ALT, NOINVERT
     "N",            ID_FILE_NEW,            VIRTKEY, CONTROL, NOINVERT
     "O",            ID_FILE_OPEN,           VIRTKEY, CONTROL, NOINVERT
     "P",            ID_FILE_PRINT,          VIRTKEY, CONTROL, NOINVERT
@@ -2620,14 +2639,15 @@ BEGIN
     CONTROL         "&Highlight syntax",IDC_HILITE_CHECK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,6,309,10
     LTEXT           "&Tree-sitter:",IDC_STATIC,7,18,256,10
     COMBOBOX        IDC_TREE_SITTER_MODE,7,30,310,34,CBS_DROPDOWNLIST | WS_VSCROLL | WS_GROUP | WS_TABSTOP
-    CONTROL         "&Preserve original EOL",IDC_MIXED_EOL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,46,309,10
-    GROUPBOX        "Tabs",IDC_STATIC,7,58,311,72,WS_GROUP
-    LTEXT           "&Tab size:",IDC_STATIC,14,70,256,10
-    EDITTEXT        IDC_TAB_EDIT,24,82,18,12,ES_RIGHT | ES_AUTOHSCROLL | ES_NUMBER,WS_EX_RIGHT
-    CONTROL         "&Insert tabs",IDC_PROP_INSERT_TABS,"Button",BS_AUTORADIOBUTTON | WS_GROUP,14,100,256,10
-    CONTROL         "Insert &spaces",IDC_PROP_INSERT_SPACES,"Button",BS_AUTORADIOBUTTON,14,112,256,10
-    LTEXT           "&Rendering mode:",IDC_STATIC,7,134,310,10
-    COMBOBOX        IDC_RENDERING_MODE,7,146,310,34,CBS_DROPDOWNLIST | WS_VSCROLL | WS_GROUP | WS_TABSTOP
+    CONTROL         "Enable e&xperimental safe semantic copy suggestions",IDC_SEMANTIC_MERGE_CHECK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,46,309,10
+    CONTROL         "&Preserve original EOL",IDC_MIXED_EOL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,60,309,10
+    GROUPBOX        "Tabs",IDC_STATIC,7,72,311,72,WS_GROUP
+    LTEXT           "&Tab size:",IDC_STATIC,14,84,256,10
+    EDITTEXT        IDC_TAB_EDIT,24,96,18,12,ES_RIGHT | ES_AUTOHSCROLL | ES_NUMBER,WS_EX_RIGHT
+    CONTROL         "&Insert tabs",IDC_PROP_INSERT_TABS,"Button",BS_AUTORADIOBUTTON | WS_GROUP,14,114,256,10
+    CONTROL         "Insert &spaces",IDC_PROP_INSERT_SPACES,"Button",BS_AUTORADIOBUTTON,14,126,256,10
+    LTEXT           "&Rendering mode:",IDC_STATIC,7,148,310,10
+    COMBOBOX        IDC_RENDERING_MODE,7,160,310,34,CBS_DROPDOWNLIST | WS_VSCROLL | WS_GROUP | WS_TABSTOP
     PUSHBUTTON      "Defaults",IDC_COMPARE_DEFAULTS,230,280,88,14
 END
 
@@ -5291,6 +5311,11 @@ BEGIN
     ID_ALL_RIGHT            "\nCopy All to Right"
     ID_ALL_LEFT             "\nCopy All to Left"
     ID_AUTO_MERGE           "\nAuto Merge (Ctrl+Alt+M)"
+    ID_SEMANTIC_MERGE       "\nSafe Semantic Copy to Current Pane (Ctrl+Alt+Shift+M)"
+    ID_SEMANTIC_MERGE_ALL   "\nSafe Semantic Copy All to Current Pane (Ctrl+Alt+Shift+A)"
+    ID_SEMANTIC_MERGE_LEFT  "\nSafe Semantic Copy to Left"
+    ID_SEMANTIC_MERGE_MIDDLE "\nSafe Semantic Copy to Middle"
+    ID_SEMANTIC_MERGE_RIGHT "\nSafe Semantic Copy to Right"
     ID_FIRSTFILE            "\nFirst File"
     ID_NEXTFILE             "\nNext File (Ctrl+F8)"
     ID_LASTFILE             "\nLast File"

@@ -23,6 +23,7 @@
 #include <climits>
 #include <cstring>
 #include <cwctype>
+#include <regex>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -42,6 +43,116 @@ bool HasCapturePrefix(const std::string& captureName, const char* prefix)
 int CountCaptureSegments(const std::string& captureName)
 {
     return static_cast<int>(std::count(captureName.begin(), captureName.end(), '.')) + 1;
+}
+
+/**
+ * @brief Evaluate #match?/#eq? predicates for a query match.
+ *
+ * Tree-sitter's C API does not evaluate predicates: queries that use
+ * (#match? @cap "regex") or (#eq? @cap "literal") to disambiguate captures
+ * rely on the host to filter out matches that fail the test. Without this,
+ * such patterns apply unconditionally and mis-highlight (e.g. bash/ruby/php
+ * highlights flag builtins only when the name matches a regex).
+ *
+ * Supports #match?/#not-match? (regex, ECMAScript) and #eq?/#not-eq? (literal
+ * or capture-to-capture). Unknown predicates (including #set!, handled
+ * separately) are ignored. Captured node text is read from @p docText, which
+ * must be the UTF-8 source the @p match nodes index into.
+ *
+ * @return true if the match satisfies all its predicates (or has none).
+ */
+bool EvaluateQueryPredicates(const TSQuery* pQuery, const TSQueryMatch& match,
+                             const char* docText, uint32_t docLen)
+{
+    uint32_t stepCount = 0;
+    const TSQueryPredicateStep* steps =
+        ts_query_predicates_for_pattern(pQuery, match.pattern_index, &stepCount);
+    if (!steps || stepCount == 0)
+        return true;  // No predicates = always matches
+
+    // Read the captured text for a given capture index within this match.
+    auto captureText = [&](uint32_t captureIdx) -> std::string
+    {
+        for (uint16_t c = 0; c < match.capture_count; c++)
+        {
+            if (match.captures[c].index == captureIdx)
+            {
+                uint32_t s = ts_node_start_byte(match.captures[c].node);
+                uint32_t e = ts_node_end_byte(match.captures[c].node);
+                if (s < docLen && e <= docLen && s < e)
+                    return std::string(docText + s, e - s);
+                break;
+            }
+        }
+        return std::string();
+    };
+
+    // Each predicate is a run of steps terminated by a Done sentinel.
+    uint32_t i = 0;
+    while (i < stepCount)
+    {
+        if (steps[i].type != TSQueryPredicateStepTypeString)
+        {
+            while (i < stepCount && steps[i].type != TSQueryPredicateStepTypeDone) i++;
+            if (i < stepCount) i++;  // skip Done
+            continue;
+        }
+
+        uint32_t predNameLen = 0;
+        const char* predName = ts_query_string_value_for_id(pQuery, steps[i].value_id, &predNameLen);
+        const std::string pred(predName, predNameLen);
+        i++;  // move past predicate name
+
+        if ((pred == "match?" || pred == "not-match?") &&
+            i + 2 <= stepCount &&
+            steps[i].type == TSQueryPredicateStepTypeCapture &&
+            steps[i + 1].type == TSQueryPredicateStepTypeString)
+        {
+            const std::string nodeText = captureText(steps[i].value_id);
+            uint32_t regexLen = 0;
+            const char* regexStr = ts_query_string_value_for_id(pQuery, steps[i + 1].value_id, &regexLen);
+            try
+            {
+                std::regex re(regexStr, regexLen, std::regex::ECMAScript | std::regex::optimize);
+                const bool matched = std::regex_search(nodeText, re);
+                if ((pred == "match?" && !matched) || (pred == "not-match?" && matched))
+                    return false;
+            }
+            catch (...)
+            {
+                // Invalid regex -- skip this predicate rather than dropping the match.
+            }
+            i += 2;
+        }
+        else if ((pred == "eq?" || pred == "not-eq?") &&
+                 i + 2 <= stepCount &&
+                 steps[i].type == TSQueryPredicateStepTypeCapture)
+        {
+            const std::string text1 = captureText(steps[i].value_id);
+            std::string text2;
+            if (steps[i + 1].type == TSQueryPredicateStepTypeString)
+            {
+                uint32_t sLen = 0;
+                const char* sVal = ts_query_string_value_for_id(pQuery, steps[i + 1].value_id, &sLen);
+                text2.assign(sVal, sLen);
+            }
+            else if (steps[i + 1].type == TSQueryPredicateStepTypeCapture)
+            {
+                text2 = captureText(steps[i + 1].value_id);
+            }
+
+            const bool equal = (text1 == text2);
+            if ((pred == "eq?" && !equal) || (pred == "not-eq?" && equal))
+                return false;
+            i += 2;
+        }
+
+        // Advance to the Done sentinel for this predicate.
+        while (i < stepCount && steps[i].type != TSQueryPredicateStepTypeDone) i++;
+        if (i < stepCount) i++;  // skip Done
+    }
+
+    return true;
 }
 
 int MakeCapturePriority(const std::string& captureName, uint32_t startByte, uint32_t endByte)
@@ -1059,6 +1170,11 @@ void CTreeSitterParser::RunHighlightQuery()
     TSQueryMatch match;
     while (ts_query_cursor_next_match(pCursor, &match))
     {
+        // Honor #match?/#eq? predicates: drop matches whose predicates fail.
+        if (!EvaluateQueryPredicates(pQuery, match, m_documentText.c_str(),
+                                     static_cast<uint32_t>(m_documentText.size())))
+            continue;
+
         for (uint16_t i = 0; i < match.capture_count; i++)
         {
             TSQueryCapture capture = match.captures[i];
@@ -1288,6 +1404,11 @@ void CTreeSitterParser::RunInjectionQuery()
     TSQueryMatch match;
     while (ts_query_cursor_next_match(pCursor, &match))
     {
+        // Honor #match?/#eq? predicates on the injection pattern.
+        if (!EvaluateQueryPredicates(pQuery, match, m_documentText.c_str(),
+                                     static_cast<uint32_t>(m_documentText.size())))
+            continue;
+
         std::string language;
         TSNode contentNode = {};
         bool hasContent = false;
@@ -1403,6 +1524,12 @@ void CTreeSitterParser::RunInjectionQuery()
                 TSQueryMatch injMatch;
                 while (ts_query_cursor_next_match(pInjCursor, &injMatch))
                 {
+                    // injMatch nodes index into injContent, so evaluate the
+                    // injected grammar's predicates against that text.
+                    if (!EvaluateQueryPredicates(pInjQuery, injMatch, injContent.c_str(),
+                                                 static_cast<uint32_t>(injContent.size())))
+                        continue;
+
                     for (uint16_t ci = 0; ci < injMatch.capture_count; ci++)
                     {
                         TSQueryCapture cap = injMatch.captures[ci];
@@ -1606,6 +1733,15 @@ static const struct
     { L"nim",   L"nim" },
     { L"toml",  L"toml" },
     { L"md",    L"markdown" },
+    { L"r",     L"r" },
+    { L"cmake", L"cmake" },
+    { L"f",     L"fortran" },
+    { L"for",   L"fortran" },
+    { L"f90",   L"fortran" },
+    { L"f95",   L"fortran" },
+    { L"pas",   L"pascal" },
+    { L"pp",    L"pascal" },
+    { L"m",     L"matlab" },
 };
 
 TreeSitterRegistry& TreeSitterRegistry::Instance()

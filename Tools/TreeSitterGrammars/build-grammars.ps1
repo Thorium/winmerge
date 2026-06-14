@@ -81,6 +81,32 @@ function Get-VcArch {
 
 # ---- Download grammar source ----
 
+# Extract a GitHub auto-generated source zip, stripping the leading
+# "<repo>-<tag>/" path component so the layout matches a release tarball.
+function Expand-SourceZip {
+    param([string]$ZipPath, [string]$DestDir)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        foreach ($entry in $zip.Entries) {
+            $rel = $entry.FullName
+            $slash = $rel.IndexOf('/')
+            if ($slash -ge 0) { $rel = $rel.Substring($slash + 1) }
+            if (-not $rel) { continue }
+            $dest = Join-Path $DestDir ($rel -replace '/', '\')
+            if ($entry.FullName.EndsWith('/')) {
+                New-Item -ItemType Directory -Path $dest -Force | Out-Null
+                continue
+            }
+            $parent = Split-Path -Parent $dest
+            if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dest, $true)
+        }
+    } finally {
+        $zip.Dispose()
+    }
+}
+
 function Get-GrammarSource {
     param([string]$Repo, [string]$Tag)
     $name = ($Repo -split '/')[-1]
@@ -92,7 +118,8 @@ function Get-GrammarSource {
     New-Item -ItemType Directory -Path $TempBase -Force | Out-Null
     New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
 
-    # Try .tar.gz first, then .tar.xz (older releases use xz)
+    # Prefer a release tarball (.tar.gz then .tar.xz); extract with git-bash tar
+    # (Windows tar.exe trips on ./-prefixed entries).
     $downloaded = $false
     foreach ($ext in @("tar.gz", "tar.xz")) {
         $tarUrl  = "https://github.com/$Repo/releases/download/$Tag/$name.$ext"
@@ -100,23 +127,39 @@ function Get-GrammarSource {
         try {
             Write-Host "  Downloading $name.$ext ..."
             Invoke-WebRequest -Uri $tarUrl -OutFile $tarFile -UseBasicParsing -ErrorAction Stop
+            Write-Host "  Extracting ..."
+            $gitBash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
+            $unixTarFile = $tarFile -replace '\\','/' -replace '^([A-Za-z]):','/$1'
+            $unixExtractDir = $extractDir -replace '\\','/' -replace '^([A-Za-z]):','/$1'
+            & $gitBash -c "tar -xf '$unixTarFile' -C '$unixExtractDir'"
+            Remove-Item $tarFile -Force -EA SilentlyContinue
             $downloaded = $true
             break
         } catch {
-            # Try next format
+            Remove-Item $tarFile -Force -EA SilentlyContinue
         }
     }
+
+    # Fallback: GitHub's auto-generated source zip, which exists for every tag
+    # (many grammar repos publish no release tarball assets at all).
     if (-not $downloaded) {
-        throw "No release tarball found for $Repo $Tag"
+        $zipUrl  = "https://github.com/$Repo/archive/refs/tags/$Tag.zip"
+        $zipFile = Join-Path $TempBase "$name-src.zip"
+        try {
+            Write-Host "  Downloading source zip ($Tag) ..."
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zipFile -UseBasicParsing -ErrorAction Stop
+            Write-Host "  Extracting source zip ..."
+            Expand-SourceZip -ZipPath $zipFile -DestDir $extractDir
+            Remove-Item $zipFile -Force -EA SilentlyContinue
+            $downloaded = $true
+        } catch {
+            Remove-Item $zipFile -Force -EA SilentlyContinue
+        }
     }
 
-    Write-Host "  Extracting ..."
-    # Use git-bash tar with Unix-style paths (Windows tar.exe fails on ./prefixed entries)
-    $gitBash = Join-Path $env:ProgramFiles "Git\bin\bash.exe"
-    $unixTarFile = $tarFile -replace '\\','/' -replace '^([A-Za-z]):','/$1'
-    $unixExtractDir = $extractDir -replace '\\','/' -replace '^([A-Za-z]):','/$1'
-    & $gitBash -c "tar -xf '$unixTarFile' -C '$unixExtractDir'"
-    Remove-Item $tarFile -Force
+    if (-not $downloaded) {
+        throw "No release tarball or source zip found for $Repo $Tag"
+    }
     return $extractDir
 }
 
@@ -243,93 +286,73 @@ function Write-QueryBundle {
     return $true
 }
 
-# ---- Compile a grammar to DLL ----
+# ---- Up-to-date check ----
 
-function Build-GrammarDll {
-    param(
-        [string]$GrammarName,
-        [string]$SourceDir,
-        [string]$RepoDir,
-        [string[]]$HighlightsScm,
-        [string[]]$LocalsScm,
-        [string[]]$TagsScm,
-        [string[]]$InjectionsScm,
-        [string]$DllName
-    )
-    $srcDir   = Join-Path $SourceDir "src"
-    $parserC  = Join-Path $srcDir "parser.c"
-    $scannerC = Join-Path $srcDir "scanner.c"
-    if (-not (Test-Path $parserC)) {
-        Write-Warning "  parser.c not found at $parserC - skipping $GrammarName"
-        return $false
-    }
-    $sources = @($parserC)
-    if (Test-Path $scannerC) { $sources += $scannerC }
-
-    $buildDir = Join-Path $RepoRoot "BuildTmp\grammar-build\$DllName\$Platform\$Configuration"
-    New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
-    New-Item -ItemType Directory -Path $OutDir   -Force | Out-Null
-    $dllPath = Join-Path $OutDir "$DllName.dll"
-
-    $cflags = @("/nologo","/c","/TC","/W3","/D_USRDLL","/D_WINDOWS","/wd4996","/wd4267","/wd4244","/wd4101")
-    if ($Configuration -eq "Release") {
-        $cflags += @("/O2","/MD","/DNDEBUG","/GL")
-    } else {
-        $cflags += @("/Od","/MDd","/D_DEBUG","/Zi")
-    }
-
-    $objFiles = @()
-    foreach ($src in $sources) {
-        $objName = [IO.Path]::GetFileNameWithoutExtension($src) + ".obj"
-        $objPath = Join-Path $buildDir $objName
-        $objFiles += $objPath
-        $fileName = [IO.Path]::GetFileName($src)
-        Write-Host "  Compiling $fileName ..."
-        $allArgs = $cflags + @("/I`"$srcDir`"", "/Fo`"$objPath`"", "`"$src`"")
-        $p = Start-Process cl.exe -ArgumentList $allArgs -NoNewWindow -Wait -PassThru
-        if ($p.ExitCode -ne 0) {
-            Write-Error "  cl.exe failed for $fileName (exit $($p.ExitCode))"
-            return $false
+# A grammar needs (re)building when its DLL is missing or older than any input
+# (the generated sources or this script). Query .scm files are bundled
+# separately and aren't compiled into the DLL, so they're not inputs here.
+function Test-NeedsBuild {
+    param([string]$DllPath, [string[]]$Inputs)
+    if (-not (Test-Path $DllPath)) { return $true }
+    $dllTime = (Get-Item $DllPath).LastWriteTimeUtc
+    foreach ($in in $Inputs) {
+        if ($in -and (Test-Path $in)) {
+            if ((Get-Item $in).LastWriteTimeUtc -gt $dllTime) { return $true }
         }
     }
+    return $false
+}
 
-    Write-Host "  Linking $DllName.dll ..."
-    $linkArgs = @("/nologo","/DLL","/OUT:`"$dllPath`"")
-    if ($Configuration -eq "Release") {
-        $linkArgs += @("/LTCG","/OPT:REF","/OPT:ICF")
-    } else {
-        $linkArgs += @("/DEBUG")
-    }
-    $linkArgs += $objFiles
-    $p = Start-Process link.exe -ArgumentList $linkArgs -NoNewWindow -Wait -PassThru
-    if ($p.ExitCode -ne 0) {
-        Write-Error "  link.exe failed for $DllName (exit $($p.ExitCode))"
-        return $false
-    }
+# ---- Parallel compilation ----
 
-    if (Write-QueryBundle -DestinationPath (Join-Path $OutDir "$GrammarName-highlights.scm") -SourcePaths $HighlightsScm) {
-        Write-Host "  Bundled highlights -> $GrammarName-highlights.scm"
-    } else {
-        Write-Warning "  No highlights.scm for $GrammarName"
+# Self-contained compile+link for one grammar. Runs inside a background job, so
+# it may use only its $Plan argument, the inherited MSVC environment, and
+# built-in cmdlets (no script-level functions/variables).
+$BuildGrammarScript = {
+    param($Plan)
+    New-Item -ItemType Directory -Path $Plan.BuildDir -Force | Out-Null
+    $objs = @()
+    foreach ($src in $Plan.Sources) {
+        $obj = Join-Path $Plan.BuildDir ([IO.Path]::GetFileNameWithoutExtension($src) + ".obj")
+        $objs += $obj
+        $clArgs = @($Plan.CFlags) + @("/I$($Plan.SrcDir)", "/Fo$obj", "$src")
+        $out = & cl.exe @clArgs 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            return [pscustomobject]@{ Name = $Plan.Name; Ok = $false; Stage = "compile $([IO.Path]::GetFileName($src))"; Output = ($out -join [Environment]::NewLine) }
+        }
     }
-    if (Write-QueryBundle -DestinationPath (Join-Path $OutDir "$GrammarName-locals.scm") -SourcePaths $LocalsScm) {
-        Write-Host "  Bundled locals -> $GrammarName-locals.scm"
+    $linkArgs = @($Plan.LinkFlags) + @("/OUT:$($Plan.DllPath)") + $objs
+    $out = & link.exe @linkArgs 2>&1
+    return [pscustomobject]@{ Name = $Plan.Name; Ok = ($LASTEXITCODE -eq 0); Stage = "link"; Output = ($out -join [Environment]::NewLine) }
+}
+
+# Run build plans with bounded parallelism using background jobs (PowerShell 5.1
+# compatible; ForEach-Object -Parallel needs pwsh 7, which the build doesn't use).
+function Invoke-GrammarBuilds {
+    param([scriptblock]$Action, [object[]]$Plans, [int]$Throttle)
+    $results = @()
+    if (-not $Plans -or $Plans.Count -eq 0) { return $results }
+    if ($Throttle -lt 1) { $Throttle = 1 }
+    $queue = New-Object System.Collections.Queue
+    foreach ($pl in $Plans) { [void]$queue.Enqueue($pl) }
+    $jobs = New-Object System.Collections.ArrayList
+    while ($queue.Count -gt 0 -or $jobs.Count -gt 0) {
+        while ($jobs.Count -lt $Throttle -and $queue.Count -gt 0) {
+            [void]$jobs.Add((Start-Job -ScriptBlock $Action -ArgumentList $queue.Dequeue()))
+        }
+        $finished = Wait-Job -Job ($jobs.ToArray()) -Any
+        foreach ($j in @($finished)) {
+            $results += Receive-Job -Job $j
+            Remove-Job -Job $j
+            $jobs.Remove($j)
+        }
     }
-    if (Write-QueryBundle -DestinationPath (Join-Path $OutDir "$GrammarName-tags.scm") -SourcePaths $TagsScm) {
-        Write-Host "  Bundled tags -> $GrammarName-tags.scm"
-    }
-    if (Write-QueryBundle -DestinationPath (Join-Path $OutDir "$GrammarName-injections.scm") -SourcePaths $InjectionsScm) {
-        Write-Host "  Bundled injections -> $GrammarName-injections.scm"
-    }
-    Write-Host "  OK: $dllPath"
-    return $true
+    return $results
 }
 
 # ---- Main ----
 
-$succeeded = [int]0
-$failed    = [int]0
-$skipped   = [int]0
+$succeeded = 0; $failed = 0; $skipped = 0; $cached = 0
 
 Write-Host "=== WinMerge Tree-Sitter Grammar Builder ==="
 Write-Host "Platform:      $Platform"
@@ -340,11 +363,27 @@ Write-Host ""
 Import-VcEnvironment -Arch (Get-VcArch)
 Write-Host ""
 
-$config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+# Shared compiler/linker flags. /GL (whole-program opt) and /LTCG are
+# intentionally omitted: tree-sitter parser.c is mostly generated state tables,
+# so they add large build time for negligible runtime benefit.
+$cflags    = @("/nologo","/c","/TC","/W3","/D_USRDLL","/D_WINDOWS","/wd4996","/wd4267","/wd4244","/wd4101")
+$linkFlags = @("/nologo","/DLL")
+if ($Configuration -eq "Release") {
+    $cflags    += @("/O2","/MD","/DNDEBUG")
+    $linkFlags += @("/OPT:REF","/OPT:ICF")
+} else {
+    $cflags    += @("/Od","/MDd","/D_DEBUG","/Zi")
+    $linkFlags += @("/DEBUG")
+}
 
+$config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+
+# Phase 1 (sequential, fast): download sources, bundle query files, and decide
+# which grammars actually need recompiling.
+$plans = @()
 foreach ($entry in $config.grammars) {
-    $repo     = $entry.repo
-    $tag      = $entry.tag
+    $repo = $entry.repo; $tag = $entry.tag
     $repoName = ($repo -split '/')[-1]
     Write-Host "--- $repoName ($tag) ---"
 
@@ -370,27 +409,73 @@ foreach ($entry in $config.grammars) {
         if (-not $gPath) { $gPath = "." }
 
         if ($GrammarFilter -and ($gName -notmatch $GrammarFilter)) {
-            Write-Host "  Skipping $gName (filtered)"
             $skipped++
             continue
         }
 
         $sourceDir = if ($gPath -eq ".") { $repoDir } else { Join-Path $repoDir $gPath }
         $dllName   = "tree-sitter-$gName"
+        $srcDir    = Join-Path $sourceDir "src"
+        $parserC   = Join-Path $srcDir "parser.c"
+        $scannerC  = Join-Path $srcDir "scanner.c"
+        if (-not (Test-Path $parserC)) {
+            Write-Warning "  parser.c not found for $gName - skipping"
+            $skipped++
+            continue
+        }
+        $sources = @($parserC)
+        if (Test-Path $scannerC) { $sources += $scannerC }
 
-        # Resolve .scm query files. When tree-sitter.json uses an array, all
-        # matching files are bundled in order so inherited queries are kept.
+        # Resolve & bundle .scm query files (cheap; always refreshed).
         $hlScm = Resolve-QueryFiles -QuerySpec $g.highlights -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\highlights.scm"
-        $lcScm = Resolve-QueryFiles -QuerySpec $g.locals -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\locals.scm"
-        $tgScm = Resolve-QueryFiles -QuerySpec $g.tags -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\tags.scm"
+        $lcScm = Resolve-QueryFiles -QuerySpec $g.locals     -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\locals.scm"
+        $tgScm = Resolve-QueryFiles -QuerySpec $g.tags       -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\tags.scm"
         $ijScm = Resolve-QueryFiles -QuerySpec $g.injections -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\injections.scm"
+        if (-not (Write-QueryBundle -DestinationPath (Join-Path $OutDir "$gName-highlights.scm") -SourcePaths $hlScm)) {
+            Write-Warning "  No highlights.scm for $gName"
+        }
+        [void](Write-QueryBundle -DestinationPath (Join-Path $OutDir "$gName-locals.scm")     -SourcePaths $lcScm)
+        [void](Write-QueryBundle -DestinationPath (Join-Path $OutDir "$gName-tags.scm")       -SourcePaths $tgScm)
+        [void](Write-QueryBundle -DestinationPath (Join-Path $OutDir "$gName-injections.scm") -SourcePaths $ijScm)
 
-        Write-Host "  Grammar: $gName (path: $gPath)"
-        $ok = Build-GrammarDll -GrammarName $gName -SourceDir $sourceDir -RepoDir $repoDir -HighlightsScm $hlScm -LocalsScm $lcScm -TagsScm $tgScm -InjectionsScm $ijScm -DllName $dllName
-        if ($ok) { $succeeded++ } else { $failed++ }
+        $dllPath  = Join-Path $OutDir "$dllName.dll"
+        $buildDir = Join-Path $RepoRoot "BuildTmp\grammar-build\$dllName\$Platform\$Configuration"
+        if (-not (Test-NeedsBuild -DllPath $dllPath -Inputs (@($sources) + @($PSCommandPath)))) {
+            Write-Host "  Up to date: $dllName.dll"
+            $cached++
+            continue
+        }
+
+        $plans += @{
+            Name      = $dllName
+            Sources   = $sources
+            SrcDir    = $srcDir
+            BuildDir  = $buildDir
+            DllPath   = $dllPath
+            CFlags    = $cflags
+            LinkFlags = $linkFlags
+        }
     }
     Write-Host ""
 }
 
-Write-Host "=== Done: $succeeded succeeded, $failed failed, $skipped skipped ==="
+# Phase 2 (parallel): compile + link the grammars that need it.
+if ($plans.Count -gt 0) {
+    $throttle = [Environment]::ProcessorCount
+    if ($throttle -lt 1) { $throttle = 1 }
+    Write-Host "Building $($plans.Count) grammar(s) with up to $throttle parallel job(s) ..."
+    foreach ($r in (Invoke-GrammarBuilds -Action $BuildGrammarScript -Plans $plans -Throttle $throttle)) {
+        if ($r.Ok) {
+            Write-Host "  OK: $($r.Name).dll"
+            $succeeded++
+        } else {
+            Write-Warning "  FAILED ($($r.Stage)): $($r.Name)"
+            if ($r.Output) { Write-Host $r.Output }
+            $failed++
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "=== Done: $succeeded built, $cached up-to-date, $failed failed, $skipped skipped ==="
 if ($failed -gt 0) { exit 1 }

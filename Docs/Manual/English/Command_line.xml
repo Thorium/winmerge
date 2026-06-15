@@ -115,6 +115,8 @@
 
       <arg choice="opt" rep="norepeat"><option>/enableexitcode</option></arg>
 
+      <arg choice="opt" rep="norepeat"><option>/checkonly</option></arg>
+
       <arg choice="opt" rep="norepeat"><option>/ignorews</option></arg>
 
       <arg choice="opt" rep="norepeat"><option>/ignoreblanklines</option></arg>
@@ -126,6 +128,8 @@
       <arg choice="opt" rep="norepeat"><option>/ignorecodepage</option></arg>
 
       <arg choice="opt" rep="norepeat"><option>/ignorecomments</option></arg>
+
+      <arg choice="opt" rep="norepeat"><option>/ignoretrailingpunctuation</option></arg>
 
       <arg choice="opt" rep="norepeat"><option>/unpacker</option>
       <replaceable>unpacker-name</replaceable></arg>
@@ -579,6 +583,20 @@
     </varlistentry>
 
     <varlistentry>
+      <term><option>/checkonly</option></term>
+      <listitem>
+        <para>Compares the files and exits with the comparison result as the process exit
+        code (0: identical, 1: different, 2: error) without leaving a window open or showing
+        any dialogs. This is a convenience preset equivalent to
+        <option>/noninteractive /enableexitcode</option>, intended for scripting and CI.
+        Combine it with <option>/ignorecomments</option>, <option>/ignoreeol</option> and/or
+        <option>/ignorews</option> for a semantic-equivalence check that ignores comment and
+        formatting differences (the comment filter is tree-sitter-aware when a grammar is
+        available for the file type).</para>
+      </listitem>
+    </varlistentry>
+
+    <varlistentry>
       <term><option>/ignorews</option></term>
       <listitem>
         <para>Controls the "Whitespaces" option (whitespace comparison settings) persistently:</para>
@@ -641,6 +659,20 @@
         <itemizedlist>
           <listitem><para><option>/ignorecomments:0</option> - disables ignoring comments.</para></listitem>
           <listitem><para><option>/ignorecomments</option> or <option>/ignorecomments:1</option> - enables ignoring comments.</para></listitem>
+        </itemizedlist>
+      </listitem>
+    </varlistentry>
+
+    <varlistentry>
+      <term><option>/ignoretrailingpunctuation</option></term>
+      <listitem>
+        <para>Controls the "Ignore trailing punctuation" option persistently. When enabled,
+        a difference that consists only of a trailing comma or semicolon at the end of a line
+        (for example a trailing comma added to the last element of a multi-line list) is
+        treated as trivial and not reported as a change:</para>
+        <itemizedlist>
+          <listitem><para><option>/ignoretrailingpunctuation:0</option> - disables ignoring trailing punctuation.</para></listitem>
+          <listitem><para><option>/ignoretrailingpunctuation</option> or <option>/ignoretrailingpunctuation:1</option> - enables ignoring trailing punctuation.</para></listitem>
         </itemizedlist>
       </listitem>
     </varlistentry>

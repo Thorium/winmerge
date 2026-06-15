@@ -99,6 +99,8 @@ BEGIN_MESSAGE_MAP(COpenView, CFormView)
 	ON_UPDATE_COMMAND_UI(ID_PROJECT_DIFF_OPTIONS_IGNORE_CODEPAGE, OnUpdateDiffIgnoreCP)
 	ON_COMMAND(ID_PROJECT_DIFF_OPTIONS_IGNORE_COMMENTS, OnDiffIgnoreComments)
 	ON_UPDATE_COMMAND_UI(ID_PROJECT_DIFF_OPTIONS_IGNORE_COMMENTS, OnUpdateDiffIgnoreComments)
+	ON_COMMAND(ID_PROJECT_DIFF_OPTIONS_IGNORE_TRAILING_PUNCTUATION, OnDiffIgnoreTrailingPunctuation)
+	ON_UPDATE_COMMAND_UI(ID_PROJECT_DIFF_OPTIONS_IGNORE_TRAILING_PUNCTUATION, OnUpdateDiffIgnoreTrailingPunctuation)
 	ON_COMMAND(ID_PROJECT_DIFF_OPTIONS_IGNORE_MISSING_TRAILING_EOL, OnDiffIgnoreMissingTrailingEol)
 	ON_UPDATE_COMMAND_UI(ID_PROJECT_DIFF_OPTIONS_IGNORE_MISSING_TRAILING_EOL, OnUpdateDiffIgnoreMissingTrailingEol)
 	ON_COMMAND(ID_PROJECT_DIFF_OPTIONS_IGNORE_LINE_BREAKS, OnDiffIgnoreLineBreaks)
@@ -358,6 +360,7 @@ void COpenView::OnInitialUpdate()
 	m_bIgnoreNumbers = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_NUMBERS);
 	m_bIgnoreCodepage = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_CODEPAGE);
 	m_bFilterCommentsLines = GetOptionsMgr()->GetBool(OPT_CMP_FILTER_COMMENTLINES);
+	m_bIgnoreTrailingPunctuation = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_TRAILING_PUNCTUATION);
 	m_bIgnoreMissingTrailingEol = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_MISSING_TRAILING_EOL);
 	m_bIgnoreLineBreaks = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_LINE_BREAKS);
 	m_nCompareMethod = GetOptionsMgr()->GetInt(OPT_CMP_METHOD);
@@ -380,6 +383,7 @@ void COpenView::OnUpdate(CView* pSender, LPARAM lHint, CObject* pHint)
 	m_bIgnoreNumbers = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_NUMBERS);
 	m_bIgnoreCodepage = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_CODEPAGE);
 	m_bFilterCommentsLines = GetOptionsMgr()->GetBool(OPT_CMP_FILTER_COMMENTLINES);
+	m_bIgnoreTrailingPunctuation = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_TRAILING_PUNCTUATION);
 	m_bIgnoreMissingTrailingEol = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_MISSING_TRAILING_EOL);
 	m_bIgnoreLineBreaks = GetOptionsMgr()->GetBool(OPT_CMP_IGNORE_LINE_BREAKS);
 	m_nCompareMethod = GetOptionsMgr()->GetInt(OPT_CMP_METHOD);
@@ -817,6 +821,7 @@ void COpenView::OnCompare(UINT nID)
 	GetOptionsMgr()->SaveOption(OPT_CMP_IGNORE_NUMBERS, m_bIgnoreNumbers);
 	GetOptionsMgr()->SaveOption(OPT_CMP_IGNORE_CODEPAGE, m_bIgnoreCodepage);
 	GetOptionsMgr()->SaveOption(OPT_CMP_FILTER_COMMENTLINES, m_bFilterCommentsLines);
+	GetOptionsMgr()->SaveOption(OPT_CMP_IGNORE_TRAILING_PUNCTUATION, m_bIgnoreTrailingPunctuation);
 	GetOptionsMgr()->SaveOption(OPT_CMP_METHOD, m_nCompareMethod);
 
 	m_constraint.Persist(true, false);
@@ -1755,6 +1760,23 @@ void COpenView::OnDiffIgnoreComments()
 void COpenView::OnUpdateDiffIgnoreComments(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(m_bFilterCommentsLines);
+}
+
+/**
+ * @brief Toggle "Ignore trailing punctuation" setting.
+ */
+void COpenView::OnDiffIgnoreTrailingPunctuation()
+{
+	m_bIgnoreTrailingPunctuation = !m_bIgnoreTrailingPunctuation;
+}
+
+/**
+ * @brief Update "Ignore trailing punctuation" state.
+ * @param [in] pCmdUI UI component to update.
+ */
+void COpenView::OnUpdateDiffIgnoreTrailingPunctuation(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_bIgnoreTrailingPunctuation);
 }
 
 /**

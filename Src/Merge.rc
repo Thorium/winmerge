@@ -1149,6 +1149,7 @@ BEGIN
         MENUITEM "Ignore Codepage &Differences", ID_DIFF_OPTIONS_IGNORE_CODEPAGE
         MENUITEM "Ignore Num&bers",             IDC_DIFF_IGNORENUMBERS
         MENUITEM "Ignore C&omment Differences", ID_DIFF_OPTIONS_IGNORE_COMMENTS
+        MENUITEM "Ignore Trailing &Punctuation", ID_DIFF_OPTIONS_IGNORE_TRAILING_PUNCTUATION
         MENUITEM "Ignore &Missing Trailing EOL", ID_DIFF_OPTIONS_IGNORE_MISSING_TRAILING_EOL
         MENUITEM "Ignore Line &Breaks (Treat as Spaces)", ID_DIFF_OPTIONS_IGNORE_LINE_BREAKS
         MENUITEM SEPARATOR
@@ -1182,6 +1183,7 @@ BEGIN
         MENUITEM "Ignore Codepage &Differences", ID_PROJECT_DIFF_OPTIONS_IGNORE_CODEPAGE
         MENUITEM "Ignore Num&bers",             ID_PROJECT_DIFF_OPTIONS_IGNORE_NUMBERS
         MENUITEM "Ignore C&omment Differences", ID_PROJECT_DIFF_OPTIONS_IGNORE_COMMENTS
+        MENUITEM "Ignore Trailing &Punctuation", ID_PROJECT_DIFF_OPTIONS_IGNORE_TRAILING_PUNCTUATION
         MENUITEM "Ignore &Missing Trailing EOL", ID_PROJECT_DIFF_OPTIONS_IGNORE_MISSING_TRAILING_EOL
         MENUITEM "Ignore Line &Breaks (Treat as Spaces)", ID_PROJECT_DIFF_OPTIONS_IGNORE_LINE_BREAKS
         MENUITEM SEPARATOR
@@ -2621,17 +2623,19 @@ BEGIN
     CONTROL         "Ignore codepage &differences",IDC_CP_SENSITIVE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,108,309,10
     CONTROL         "Ignore c&omment differences",IDC_FILTERCOMMENTS_CHECK,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,120,239,10
-    CONTROL         "Ignore &missing trailing EOL",IDC_IGNEOFEOL_CHECK,
+    CONTROL         "Ignore trailing &punctuation (, ;)",IDC_IGNORETRAILINGPUNCT_CHECK,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,132,239,10
-    CONTROL         "Ignore line &breaks (treat as spaces)",IDC_IGNLBRKS_CHECK,
+    CONTROL         "Ignore &missing trailing EOL",IDC_IGNEOFEOL_CHECK,
                     "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,144,239,10
-    CONTROL         "E&nable moved block detection",IDC_MOVED_BLOCKS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,156,309,10
-    CONTROL         "Align &similar lines",IDC_ALIGN_SIMILAR_LINES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,168,309,10
-    LTEXT           "Diff &algorithm:",IDC_STATIC,7,180,309,10
-    COMBOBOX        IDC_DIFF_ALGORITHM,6,192,310,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Enable indent &heuristic",IDC_INDENT_HEURISTIC,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,210,309,10
+    CONTROL         "Ignore line &breaks (treat as spaces)",IDC_IGNLBRKS_CHECK,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,156,239,10
+    CONTROL         "E&nable moved block detection",IDC_MOVED_BLOCKS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,168,309,10
+    CONTROL         "Align &similar lines",IDC_ALIGN_SIMILAR_LINES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,180,309,10
+    LTEXT           "Diff &algorithm:",IDC_STATIC,7,192,309,10
+    COMBOBOX        IDC_DIFF_ALGORITHM,6,204,310,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "Enable indent &heuristic",IDC_INDENT_HEURISTIC,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,222,309,10
     CONTROL         "Completely unhighlight the ignored differences",IDC_COMPLETELY_BLANK_OUT_IGNORED_DIFFERENCES,
-                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,222,309,10
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,234,309,10
     PUSHBUTTON      "Defaults",IDC_COMPARE_DEFAULTS,230,280,88,14
 END
 

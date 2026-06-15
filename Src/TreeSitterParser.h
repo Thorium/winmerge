@@ -465,6 +465,27 @@ public:
     const CTreeSitterLanguage* GetLanguageForName(const std::wstring& sLangName);
 
     /**
+     * @brief Detect the tree-sitter language for a file by name, extension, then content.
+     * @param sPath           Full path or file name (used for whole-name and extension match).
+     * @param sContentPrefix  Optional first bytes of the file (UTF-8/ASCII) for the
+     *                        shebang / emacs mode line fallback. Pass a small prefix
+     *                        (~2 KB) - the whole document is not needed.
+     * @return Language name (e.g. "python"), or empty if undetected.
+     *
+     * Precedence: 1. whole filename (e.g. "Dockerfile"), 2. extension, 3. content
+     * (emacs mode line, then shebang). Pure mapping; loads no grammar.
+     */
+    std::wstring DetectLanguageName(const std::wstring& sPath, const std::string& sContentPrefix = {});
+
+    /**
+     * @brief Find a loaded language for a file using @ref DetectLanguageName.
+     * @param sPath           Full path or file name.
+     * @param sContentPrefix  Optional first bytes for shebang / mode line detection.
+     * @return Pointer to the language, or nullptr if not available.
+     */
+    const CTreeSitterLanguage* GetLanguageForFile(const std::wstring& sPath, const std::string& sContentPrefix = {});
+
+    /**
      * @brief Register a file extension mapping to a language name.
      * @param sExt       Extension (e.g. "fs").
      * @param sLanguage  Language name (e.g. "fsharp").

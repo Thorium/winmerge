@@ -226,6 +226,7 @@ inline const String OPT_CMP_IGNORE_EOL {_T("Settings/IgnoreEol"s)};
 inline const String OPT_CMP_IGNORE_CODEPAGE {_T("Settings/IgnoreCodepage"s)};
 inline const String OPT_CMP_IGNORE_MISSING_TRAILING_EOL {_T("Settings/IgnoreMissingTrailingEol"s)};
 inline const String OPT_CMP_IGNORE_LINE_BREAKS {_T("Settings/IgnoreLineBreaks"s)};
+inline const String OPT_CMP_IGNORE_TRAILING_PUNCTUATION {_T("Settings/IgnoreTrailingPunctuation"s)};
 inline const String OPT_CMP_METHOD {_T("Settings/CompMethod2"s)};
 inline const String OPT_CMP_MOVED_BLOCKS {_T("Settings/MovedBlocks"s)};
 inline const String OPT_CMP_ALIGN_SIMILAR_LINES {_T("Settings/MatchSimilarLines"s)};

@@ -509,6 +509,30 @@ void CMergeDoc::UpdateTreeSitterSupport()
 		String sExt = GetFileExt(m_ptBuf[nBuffer]->GetTempFileName().c_str(), m_strDesc[nBuffer].c_str());
 		const CTreeSitterLanguage* pLang = registry.GetLanguageForExt(sExt.c_str());
 		if (pLang == nullptr || pLang->GetLanguage() == nullptr)
+		{
+			// The extension didn't resolve a grammar. Fall back to whole-filename
+			// detection (e.g. "Dockerfile", "Rakefile") and a content sniff of the
+			// first bytes (shebang line / emacs mode line), using the original path.
+			const String& sPath = m_filePaths[nBuffer];
+			if (!sPath.empty())
+			{
+				std::string sContentPrefix;
+				const int nLines = m_ptBuf[nBuffer]->GetLineCount();
+				for (int i = 0; i < nLines && sContentPrefix.size() < 2048; ++i)
+				{
+					const tchar_t* pszLine = m_ptBuf[nBuffer]->GetLineChars(i);
+					const int nLen = m_ptBuf[nBuffer]->GetLineLength(i);
+					for (int j = 0; j < nLen && sContentPrefix.size() < 2048; ++j)
+					{
+						const tchar_t ch = pszLine[j];
+						sContentPrefix.push_back(ch < 128 ? static_cast<char>(ch) : '?');
+					}
+					sContentPrefix.push_back('\n'); // delimit lines for shebang / mode line scan
+				}
+				pLang = registry.GetLanguageForFile(sPath, sContentPrefix);
+			}
+		}
+		if (pLang == nullptr || pLang->GetLanguage() == nullptr)
 			continue;
 
 		m_pTreeSitterParsers[nBuffer] = std::make_unique<CTreeSitterParser>();

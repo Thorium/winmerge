@@ -21,6 +21,7 @@
 #include <cassert>
 #include <algorithm>
 #include <climits>
+#include <cctype>
 #include <cstring>
 #include <cwctype>
 #include <regex>
@@ -1723,12 +1724,20 @@ static const struct
     { L"pl",    L"perl" },
     { L"swift", L"swift" },
     { L"kt",    L"kotlin" },
+    { L"kts",   L"kotlin" },
     { L"scala", L"scala" },
+    { L"sc",    L"scala" },
     { L"hs",    L"haskell" },
     { L"ml",    L"ocaml" },
     { L"mli",   L"ocaml" },
     { L"ex",    L"elixir" },
     { L"exs",   L"elixir" },
+    { L"erl",   L"erlang" },
+    { L"hrl",   L"erlang" },
+    { L"elm",   L"elm" },
+    { L"jl",    L"julia" },
+    { L"nix",   L"nix" },
+    { L"sol",   L"solidity" },
     { L"zig",   L"zig" },
     { L"nim",   L"nim" },
     { L"toml",  L"toml" },
@@ -1742,7 +1751,247 @@ static const struct
     { L"pas",   L"pascal" },
     { L"pp",    L"pascal" },
     { L"m",     L"matlab" },
+
+    // Lisp family
+    { L"scm",   L"scheme" },
+    { L"ss",    L"scheme" },
+    { L"rkt",   L"racket" },
+    { L"el",    L"elisp" },
+    { L"clj",   L"clojure" },
+    { L"cljs",  L"clojure" },
+    { L"cljc",  L"clojure" },
+    { L"cljd",  L"clojure" },
+    { L"edn",   L"clojure" },
+    { L"bb",    L"clojure" },
+    { L"lisp",  L"commonlisp" },
+    { L"lsp",   L"commonlisp" },
+    { L"cl",    L"commonlisp" },
+
+    // Hardware description / assembly
+    { L"v",     L"verilog" },
+    { L"vh",    L"verilog" },
+    { L"sv",    L"verilog" },
+    { L"svh",   L"verilog" },
+    { L"vhd",   L"vhdl" },
+    { L"vhdl",  L"vhdl" },
+    { L"asm",   L"asm" },
+    { L"s",     L"asm" },
+
+    // Config / IDL
+    { L"hcl",   L"hcl" },
+    { L"tf",    L"hcl" },
+    { L"tfvars", L"hcl" },
+    { L"nomad", L"hcl" },
+    { L"proto", L"proto" },
+
+    // Extra extensions for languages already mapped above
+    { L"pm",    L"perl" },
+    { L"sbt",   L"scala" },
+    { L"ktm",   L"kotlin" },
+    { L"es",    L"erlang" },
+    { L"escript", L"erlang" },
+    { L"xrl",   L"erlang" },
+    { L"yrl",   L"erlang" },
 };
+
+// Whole-filename -> language, for files whose extension is absent or misleading.
+// Matched case-insensitively against the bare file name. Only names backed by a
+// grammar we ship are listed.
+static const struct
+{
+    const wchar_t* name;
+    const wchar_t* language;
+} s_defaultFileNameMap[] =
+{
+    { L"cmakelists.txt", L"cmake" },
+    { L"rakefile",       L"ruby" },
+    { L"gemfile",        L"ruby" },
+    { L"podfile",        L"ruby" },
+    { L"guardfile",      L"ruby" },
+    { L"capfile",        L"ruby" },
+    { L"vagrantfile",    L"ruby" },
+    { L"brewfile",       L"ruby" },
+    { L"rebar.config",   L"erlang" },
+    { L"rebar.lock",     L"erlang" },
+    { L"emakefile",      L"erlang" },
+    { L"pkgbuild",       L"bash" },
+    { L".bashrc",        L"bash" },
+    { L".bash_profile",  L"bash" },
+    { L".bash_login",    L"bash" },
+    { L".bash_logout",   L"bash" },
+    { L".bash_aliases",  L"bash" },
+    { L".profile",       L"bash" },
+    { L".zshrc",         L"bash" },
+    { L".zshenv",        L"bash" },
+    { L".zprofile",      L"bash" },
+    { L".zlogin",        L"bash" },
+    { L".zlogout",       L"bash" },
+    { L"sconstruct",     L"python" },
+    { L"sconscript",     L"python" },
+    { L"wscript",        L"python" },
+};
+
+// Map an interpreter/mode token (from a shebang or an emacs mode line) to one of
+// the grammars we ship. Tokens are matched case-insensitively after stripping a
+// trailing version digit (e.g. "python3" -> "python") and any "-ts"/"-mode" suffix
+// used by emacs major-mode names (e.g. "python-ts-mode" -> "python"). Only tokens
+// resolving to a shipped grammar are listed.
+static std::wstring LanguageFromInterpreterToken(std::string token)
+{
+    for (auto& c : token)
+        c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+
+    // Drop emacs major-mode decorations: "python-ts-mode" / "c++-mode" -> "python" / "c++".
+    for (const char* suffix : { "-ts-mode", "-mode", "-ts" })
+    {
+        const size_t len = std::char_traits<char>::length(suffix);
+        if (token.size() > len && token.compare(token.size() - len, len, suffix) == 0)
+        {
+            token.resize(token.size() - len);
+            break;
+        }
+    }
+    // Drop a trailing interpreter version ("python3", "python2.7", "ruby2").
+    while (!token.empty() && (std::isdigit(static_cast<unsigned char>(token.back())) || token.back() == '.'))
+        token.pop_back();
+
+    static const std::unordered_map<std::string, std::wstring> kTokenMap = {
+        { "python", L"python" }, { "py", L"python" },
+        { "bash", L"bash" }, { "sh", L"bash" }, { "zsh", L"bash" }, { "ksh", L"bash" },
+        { "dash", L"bash" }, { "ash", L"bash" }, { "shell", L"bash" }, { "shell-script", L"bash" },
+        { "ruby", L"ruby" }, { "perl", L"perl" }, { "raku", L"perl" },
+        { "node", L"javascript" }, { "nodejs", L"javascript" }, { "javascript", L"javascript" }, { "js", L"javascript" },
+        { "lua", L"lua" }, { "php", L"php" }, { "r", L"r" }, { "rscript", L"r" }, { "littler", L"r" },
+        { "scheme", L"scheme" }, { "guile", L"scheme" }, { "chicken", L"scheme" }, { "csi", L"scheme" },
+        { "racket", L"racket" },
+        { "sbcl", L"commonlisp" }, { "lisp", L"commonlisp" }, { "clisp", L"commonlisp" }, { "ecl", L"commonlisp" },
+        { "common-lisp", L"commonlisp" }, { "commonlisp", L"commonlisp" }, { "lisp-interaction", L"commonlisp" },
+        { "clojure", L"clojure" }, { "clj", L"clojure" }, { "clojurescript", L"clojure" }, { "clojurec", L"clojure" },
+        { "bb", L"clojure" }, { "babashka", L"clojure" },
+        { "emacs-lisp", L"elisp" }, { "elisp", L"elisp" },
+        { "julia", L"julia" }, { "elixir", L"elixir" }, { "iex", L"elixir" },
+        { "escript", L"erlang" }, { "erlang", L"erlang" },
+        { "haskell", L"haskell" }, { "runhaskell", L"haskell" }, { "runghc", L"haskell" }, { "stack", L"haskell" },
+        { "swift", L"swift" }, { "scala", L"scala" }, { "ocaml", L"ocaml" }, { "ocamlrun", L"ocaml" },
+        { "tcc", L"c" }, { "c++", L"cpp" }, { "cpp", L"cpp" }, { "c", L"c" },
+        { "fsharpi", L"fsharp" }, { "dotnet-script", L"fsharp" },
+        { "sql", L"sql" }, { "nix", L"nix" }, { "nix-shell", L"nix" },
+        { "vhdl", L"vhdl" }, { "verilog", L"verilog" }, { "systemverilog", L"verilog" },
+        { "asm", L"asm" }, { "nasm", L"asm" }, { "gas", L"asm" },
+        { "hcl", L"hcl" }, { "terraform", L"hcl" },
+        { "proto", L"proto" }, { "protobuf", L"proto" },
+    };
+    const auto it = kTokenMap.find(token);
+    return it != kTokenMap.end() ? it->second : std::wstring{};
+}
+
+// Recognize a shebang ("#!/usr/bin/env python3", "#!/bin/bash", "#!/usr/bin/perl -w")
+// and resolve the interpreter to a grammar.
+static std::wstring DetectFromShebang(const std::string& firstLine)
+{
+    if (firstLine.size() < 2 || firstLine[0] != '#' || firstLine[1] != '!')
+        return {};
+
+    // Split the shebang into whitespace-delimited words after "#!".
+    std::vector<std::string> words;
+    std::string word;
+    for (size_t i = 2; i < firstLine.size(); ++i)
+    {
+        const char c = firstLine[i];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+        {
+            if (!word.empty()) { words.push_back(word); word.clear(); }
+        }
+        else
+        {
+            word.push_back(c);
+        }
+    }
+    if (!word.empty())
+        words.push_back(word);
+    if (words.empty())
+        return {};
+
+    auto baseName = [](std::string p) -> std::string {
+        const auto slash = p.find_last_of("/\\");
+        return slash == std::string::npos ? p : p.substr(slash + 1);
+    };
+
+    // The interpreter is the first word's basename; "env" defers to the next word.
+    std::string interp = baseName(words[0]);
+    if ((interp == "env" || interp.empty()) && words.size() > 1)
+    {
+        // Skip env options like "-S" and VAR=value assignments.
+        for (size_t i = 1; i < words.size(); ++i)
+        {
+            const std::string& w = words[i];
+            if (!w.empty() && w[0] == '-')
+                continue;
+            if (w.find('=') != std::string::npos)
+                continue;
+            interp = baseName(w);
+            break;
+        }
+    }
+    return LanguageFromInterpreterToken(interp);
+}
+
+// Recognize an emacs file-local mode line within the first two lines:
+//   "-*- mode: python -*-"  or the shorthand  "-*- ruby -*-".
+static std::wstring DetectFromEmacsModeline(const std::string& text)
+{
+    // Limit the scan to the first two lines, where emacs looks for the mode line.
+    size_t scanEnd = 0;
+    int newlines = 0;
+    for (; scanEnd < text.size() && newlines < 2; ++scanEnd)
+    {
+        if (text[scanEnd] == '\n')
+            ++newlines;
+    }
+    const std::string head = text.substr(0, scanEnd);
+
+    const auto open = head.find("-*-");
+    if (open == std::string::npos)
+        return {};
+    const auto close = head.find("-*-", open + 3);
+    if (close == std::string::npos)
+        return {};
+
+    std::string body = head.substr(open + 3, close - (open + 3));
+
+    // Form 1: a property list containing "mode: <name>" (possibly among others).
+    const auto modePos = body.find("mode:");
+    std::string token;
+    if (modePos != std::string::npos)
+    {
+        size_t i = modePos + 5;
+        while (i < body.size() && (body[i] == ' ' || body[i] == '\t'))
+            ++i;
+        while (i < body.size() && body[i] != ';' && body[i] != ' ' && body[i] != '\t')
+            token.push_back(body[i++]);
+    }
+    else if (body.find(':') == std::string::npos)
+    {
+        // Form 2 (shorthand): the whole body is the mode name.
+        size_t start = body.find_first_not_of(" \t");
+        size_t stop = body.find_last_not_of(" \t");
+        if (start != std::string::npos)
+            token = body.substr(start, stop - start + 1);
+    }
+    if (token.empty())
+        return {};
+    return LanguageFromInterpreterToken(token);
+}
+
+// Extract the bare, lower-cased file name from a path (handles / and \ separators).
+static std::wstring GetFileNameLower(const std::wstring& path)
+{
+    const auto slash = path.find_last_of(L"/\\");
+    std::wstring name = (slash == std::wstring::npos) ? path : path.substr(slash + 1);
+    for (auto& c : name)
+        c = static_cast<wchar_t>(::towlower(c));
+    return name;
+}
 
 TreeSitterRegistry& TreeSitterRegistry::Instance()
 {
@@ -1874,6 +2123,54 @@ const CTreeSitterLanguage* TreeSitterRegistry::GetLanguageForName(const std::wst
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return LoadLanguage(sLangName);
+}
+
+std::wstring TreeSitterRegistry::DetectLanguageName(const std::wstring& sPath, const std::string& sContentPrefix)
+{
+    const std::wstring sFileName = GetFileNameLower(sPath);
+
+    // 1. Whole-filename match (e.g. "Dockerfile", "Rakefile", ".bashrc").
+    for (const auto& mapping : s_defaultFileNameMap)
+    {
+        if (sFileName == mapping.name)
+            return mapping.language;
+    }
+
+    // 2. Extension match (honours user RegisterExtension additions in m_extMap).
+    const auto dot = sFileName.find_last_of(L'.');
+    if (dot != std::wstring::npos && dot + 1 < sFileName.size())
+    {
+        const std::wstring sExt = sFileName.substr(dot + 1);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto itExt = m_extMap.find(sExt);
+        if (itExt != m_extMap.end())
+            return itExt->second;
+    }
+
+    // 3. Content-based fallback (like difftastic): an emacs mode line wins over a
+    //    shebang, mirroring emacs/difftastic precedence.
+    if (!sContentPrefix.empty())
+    {
+        std::wstring sLang = DetectFromEmacsModeline(sContentPrefix);
+        if (!sLang.empty())
+            return sLang;
+
+        const auto lineEnd = sContentPrefix.find('\n');
+        const std::string sFirstLine = sContentPrefix.substr(0, lineEnd);
+        sLang = DetectFromShebang(sFirstLine);
+        if (!sLang.empty())
+            return sLang;
+    }
+
+    return {};
+}
+
+const CTreeSitterLanguage* TreeSitterRegistry::GetLanguageForFile(const std::wstring& sPath, const std::string& sContentPrefix)
+{
+    const std::wstring sLang = DetectLanguageName(sPath, sContentPrefix);
+    if (sLang.empty())
+        return nullptr;
+    return GetLanguageForName(sLang);
 }
 
 void TreeSitterRegistry::RegisterExtension(const std::wstring& sExt, const std::wstring& sLanguage)

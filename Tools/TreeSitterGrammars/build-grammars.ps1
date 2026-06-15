@@ -227,9 +227,13 @@ function Resolve-QueryFiles {
     if ($QuerySpec) {
         $queryPaths = if ($QuerySpec -is [array]) { $QuerySpec } else { @($QuerySpec) }
         foreach ($candidate in $queryPaths) {
+            # $PSScriptRoot lets a spec point at this repo's own vendored-queries\
+            # directory (for grammars whose upstream ships no usable .scm), e.g.
+            # "vendored-queries\python-locals.scm".
             $tryPaths = @(
                 (Join-Path $RepoDir $candidate),
                 (Join-Path $SourceDir $candidate),
+                (Join-Path $PSScriptRoot $candidate),
                 (Resolve-NodeModulesPath -Candidate $candidate -CacheBaseDir $CacheBaseDir)
             ) | Where-Object { $_ }
 
@@ -286,6 +290,43 @@ function Write-QueryBundle {
     return $true
 }
 
+# ---- Parser generation (for grammars that don't ship src\parser.c) ----
+
+# A few grammars publish only grammar.js in their release tag and expect the
+# consumer to run `tree-sitter generate`. Do that on demand. Requires Node/npm on
+# PATH; if generation isn't possible the grammar is simply skipped by the caller.
+function Ensure-GeneratedParser {
+    param([string]$GrammarName, [string]$GrammarSourceDir)
+
+    $parserPath = Join-Path $GrammarSourceDir "src\parser.c"
+    if (Test-Path $parserPath) {
+        return $true
+    }
+
+    $grammarJsPath = Join-Path $GrammarSourceDir "grammar.js"
+    if (-not (Test-Path $grammarJsPath)) {
+        return $false
+    }
+
+    Write-Host "  Generating parser sources for $GrammarName ..."
+    # Invoke through cmd.exe so PATHEXT resolves npm -> npm.cmd. A bare "npm" via
+    # Start-Process can hit the extensionless Unix shell script shipped alongside
+    # node ("%1 is not a valid Win32 application").
+    Push-Location $GrammarSourceDir
+    try {
+        & cmd.exe /c npm exec --yes tree-sitter-cli -- generate 2>&1 | Write-Host
+        $exit = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($exit -ne 0) {
+        Write-Warning "  tree-sitter generate failed for $GrammarName (exit $exit) - skipping"
+        return $false
+    }
+
+    return (Test-Path $parserPath)
+}
+
 # ---- Up-to-date check ----
 
 # A grammar needs (re)building when its DLL is missing or older than any input
@@ -315,7 +356,11 @@ $BuildGrammarScript = {
     foreach ($src in $Plan.Sources) {
         $obj = Join-Path $Plan.BuildDir ([IO.Path]::GetFileNameWithoutExtension($src) + ".obj")
         $objs += $obj
-        $clArgs = @($Plan.CFlags) + @("/I$($Plan.SrcDir)", "/Fo$obj", "$src")
+        # CFlags forces C with /TC; C++ scanners (.cc/.cpp/.cxx, e.g. hcl) need /TP.
+        # cl applies the last /T* flag, so appending /TP overrides /TC for those files.
+        $langFlag = @()
+        if ($src -match '\.(cc|cpp|cxx)$') { $langFlag = @("/TP") }
+        $clArgs = @($Plan.CFlags) + $langFlag + @("/I$($Plan.SrcDir)", "/Fo$obj", "$src")
         $out = & cl.exe @clArgs 2>&1
         if ($LASTEXITCODE -ne 0) {
             return [pscustomobject]@{ Name = $Plan.Name; Ok = $false; Stage = "compile $([IO.Path]::GetFileName($src))"; Output = ($out -join [Environment]::NewLine) }
@@ -395,15 +440,24 @@ foreach ($entry in $config.grammars) {
         continue
     }
 
+    # Most grammars ship a tree-sitter.json describing their grammar name(s) and
+    # source layout. Some older/popular ones (e.g. kotlin, erlang, solidity) don't;
+    # for those, grammars.json may supply an explicit "name" and we assume the
+    # conventional single-grammar layout (sources in ./src, queries in ./queries).
     $tsJsonPath = Join-Path $repoDir "tree-sitter.json"
-    if (-not (Test-Path $tsJsonPath)) {
-        Write-Warning "  No tree-sitter.json - skipping"
+    if (Test-Path $tsJsonPath) {
+        $tsJson = Get-Content $tsJsonPath -Raw | ConvertFrom-Json
+        $grammarList = $tsJson.grammars
+    } elseif ($entry.name) {
+        Write-Host "  No tree-sitter.json; using name '$($entry.name)' from grammars.json"
+        $grammarList = @([pscustomobject]@{ name = $entry.name; path = "."; highlights = $null; locals = $null; tags = $null; injections = $null })
+    } else {
+        Write-Warning "  No tree-sitter.json and no 'name' in grammars.json - skipping"
         $skipped++
         continue
     }
-    $tsJson = Get-Content $tsJsonPath -Raw | ConvertFrom-Json
 
-    foreach ($g in $tsJson.grammars) {
+    foreach ($g in $grammarList) {
         $gName = $g.name
         $gPath = $g.path
         if (-not $gPath) { $gPath = "." }
@@ -417,20 +471,35 @@ foreach ($entry in $config.grammars) {
         $dllName   = "tree-sitter-$gName"
         $srcDir    = Join-Path $sourceDir "src"
         $parserC   = Join-Path $srcDir "parser.c"
-        $scannerC  = Join-Path $srcDir "scanner.c"
+        if (-not (Test-Path $parserC)) {
+            # Some grammars ship only grammar.js; try generating parser.c (needs Node/npm).
+            [void](Ensure-GeneratedParser -GrammarName $gName -GrammarSourceDir $sourceDir)
+        }
         if (-not (Test-Path $parserC)) {
             Write-Warning "  parser.c not found for $gName - skipping"
             $skipped++
             continue
         }
         $sources = @($parserC)
-        if (Test-Path $scannerC) { $sources += $scannerC }
+        # External scanners ship as scanner.c (C) or scanner.cc/.cpp (C++, e.g. hcl).
+        foreach ($scannerName in @("scanner.c", "scanner.cc", "scanner.cpp")) {
+            $scannerPath = Join-Path $srcDir $scannerName
+            if (Test-Path $scannerPath) { $sources += $scannerPath; break }
+        }
 
-        # Resolve & bundle .scm query files (cheap; always refreshed).
-        $hlScm = Resolve-QueryFiles -QuerySpec $g.highlights -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\highlights.scm"
-        $lcScm = Resolve-QueryFiles -QuerySpec $g.locals     -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\locals.scm"
-        $tgScm = Resolve-QueryFiles -QuerySpec $g.tags       -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\tags.scm"
-        $ijScm = Resolve-QueryFiles -QuerySpec $g.injections -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\injections.scm"
+        # Resolve & bundle .scm query files (cheap; always refreshed). A grammars.json
+        # entry may override any query set (e.g. point "locals" at a vendored-queries\
+        # file) for grammars whose upstream repo ships no usable .scm or keeps it off
+        # the conventional path; the per-entry override wins over the grammar's own
+        # tree-sitter.json spec.
+        $hlSpec  = if ($null -ne $entry.highlights)  { $entry.highlights }  else { $g.highlights }
+        $locSpec = if ($null -ne $entry.locals)      { $entry.locals }      else { $g.locals }
+        $tagSpec = if ($null -ne $entry.tags)        { $entry.tags }        else { $g.tags }
+        $injSpec = if ($null -ne $entry.injections)  { $entry.injections }  else { $g.injections }
+        $hlScm = Resolve-QueryFiles -QuerySpec $hlSpec  -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\highlights.scm"
+        $lcScm = Resolve-QueryFiles -QuerySpec $locSpec -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\locals.scm"
+        $tgScm = Resolve-QueryFiles -QuerySpec $tagSpec -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\tags.scm"
+        $ijScm = Resolve-QueryFiles -QuerySpec $injSpec -SourceDir $sourceDir -RepoDir $repoDir -CacheBaseDir $TempBase -FallbackRelativePath "queries\injections.scm"
         if (-not (Write-QueryBundle -DestinationPath (Join-Path $OutDir "$gName-highlights.scm") -SourcePaths $hlScm)) {
             Write-Warning "  No highlights.scm for $gName"
         }

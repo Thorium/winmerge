@@ -399,6 +399,16 @@ void MergeCmdLineInfo::ParseWinMergeCmdLine(const tchar_t *q)
 		{
 			m_bEnableExitCode = true;
 		}
+		else if (param == _T("checkonly"))
+		{
+			// -checkonly compares the files and exits with the comparison result
+			// as the process exit code, without leaving a window open or showing
+			// any dialogs (convenience preset for scripting/CI). Combine with
+			// -ignorecomments / -ignoreeol / -ignorews for a semantic-equivalence
+			// check that ignores formatting and comment differences.
+			m_bNonInteractive = true;
+			m_bEnableExitCode = true;
+		}
 		else if (param == _T("minimize"))
 		{
 			// -minimize means minimize the main window.
@@ -601,6 +611,10 @@ void MergeCmdLineInfo::ParseWinMergeCmdLine(const tchar_t *q)
 		else if (param == _T("ignorecomments"))
 		{
 			q = SetOption(q, OPT_CMP_FILTER_COMMENTLINES);
+		}
+		else if (param == _T("ignoretrailingpunctuation"))
+		{
+			q = SetOption(q, OPT_CMP_IGNORE_TRAILING_PUNCTUATION);
 		}
 		else if (param == _T("cfg") || param == _T("config"))
 		{

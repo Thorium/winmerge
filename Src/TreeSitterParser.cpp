@@ -706,6 +706,35 @@ void CTreeSitterParser::RunTagsQuery()
 
 	uint32_t totalBytes = GetTotalBytes();
 
+	// Expand a captured @definition.* node to the full definition body so that
+	// higher layers (e.g. semantic merge) get the whole declaration, not just
+	// the name/declarator token.
+	auto expandDefinitionNode = [](TSNode node, const std::string& captureName) -> TSNode
+	{
+		if (HasCapturePrefix(captureName, "definition.function") ||
+			HasCapturePrefix(captureName, "definition.method"))
+		{
+			for (TSNode current = node; !ts_node_is_null(current); current = ts_node_parent(current))
+			{
+				const char* nodeType = ts_node_type(current);
+				if (nodeType && strcmp(nodeType, "function_definition") == 0)
+					return current;
+			}
+		}
+
+		TSNode expanded = node;
+		for (;;)
+		{
+			TSNode parent = ts_node_parent(expanded);
+			if (ts_node_is_null(parent) || !ts_node_is_named(parent))
+				break;
+			if (ts_node_start_byte(parent) != ts_node_start_byte(expanded))
+				break;
+			expanded = parent;
+		}
+		return expanded;
+	};
+
 	TSQueryMatch match;
 	while (ts_query_cursor_next_match(pCursor, &match))
 	{
@@ -718,6 +747,8 @@ void CTreeSitterParser::RunTagsQuery()
 		{
 			uint32_t startByte;
 			uint32_t endByte;
+			uint32_t fullStartByte;  // full definition body range (defs only)
+			uint32_t fullEndByte;
 		};
 		std::vector<Range> defs;
 		std::vector<Range> refs;
@@ -747,7 +778,9 @@ void CTreeSitterParser::RunTagsQuery()
 			}
 			else if (HasCapturePrefix(sCapture, "definition"))
 			{
-				defs.push_back({ nodeStart, nodeEnd });
+				TSNode expandedNode = expandDefinitionNode(node, sCapture);
+				defs.push_back({ nodeStart, nodeEnd,
+					ts_node_start_byte(expandedNode), ts_node_end_byte(expandedNode) });
 			}
 			else if (HasCapturePrefix(sCapture, "reference"))
 			{
@@ -780,6 +813,8 @@ void CTreeSitterParser::RunTagsQuery()
 				name,
 				useNameRange ? nameStart : def.startByte,
 				useNameRange ? nameEnd : def.endByte,
+				def.fullStartByte,
+				def.fullEndByte,
 			});
 		}
 	}
@@ -787,6 +822,46 @@ void CTreeSitterParser::RunTagsQuery()
 	ts_query_cursor_delete(pCursor);
 
 	m_bTagsQueried = true;
+}
+
+bool CTreeSitterParser::TryBuildTagRange(const TagDef& def, TagRange& tagRange) const
+{
+	int startLine = 0;
+	int startChar = 0;
+	int endLine = 0;
+	int endChar = 0;
+	if (!ByteOffsetToLineChar(def.defStartByte, startLine, startChar) ||
+		!ByteOffsetToLineChar(def.defEndByte, endLine, endChar))
+	{
+		return false;
+	}
+
+	tagRange.name = ucr::toUTF8(def.name);
+	tagRange.startByte = def.defStartByte;
+	tagRange.endByte = def.defEndByte;
+	tagRange.nameStartByte = def.startByte;
+	tagRange.nameEndByte = def.endByte;
+	tagRange.startLine = startLine;
+	tagRange.startChar = startChar;
+	tagRange.endLine = endLine;
+	tagRange.endChar = endChar;
+	return true;
+}
+
+std::vector<CTreeSitterParser::TagRange> CTreeSitterParser::GetTagRanges()
+{
+	EnsureParsed();
+	EnsureTagsQueried();
+
+	std::vector<TagRange> ranges;
+	ranges.reserve(m_tagDefs.size());
+	for (const auto& def : m_tagDefs)
+	{
+		TagRange range;
+		if (TryBuildTagRange(def, range))
+			ranges.push_back(range);
+	}
+	return ranges;
 }
 
 /**

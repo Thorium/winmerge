@@ -212,6 +212,25 @@ static constexpr int kMaxLinesForHighlight = 65536;
 class CTreeSitterParser : public LangServices::ISyntaxParser
 {
 public:
+	/**
+	 * @brief A top-level definition discovered by the tags query.
+	 *
+	 * The byte/line/char ranges cover the full definition body (e.g. an entire
+	 * function), while nameStartByte/nameEndByte locate just the name token.
+	 */
+	struct TagRange
+	{
+		std::string name;
+		uint32_t startByte;
+		uint32_t endByte;
+		uint32_t nameStartByte;
+		uint32_t nameEndByte;
+		int startLine;
+		int startChar;
+		int endLine;
+		int endChar;
+	};
+
 	CTreeSitterParser() = delete;
 	virtual ~CTreeSitterParser();
 
@@ -264,6 +283,16 @@ public:
 
 	bool FindDefinition(int nLineIndex, int nCharPos, int& nDefLine, int& nDefChar);
 
+	/**
+	 * @brief Get all top-level definitions found by the tags query.
+	 * @return Definitions with full-body byte and (line, char) ranges, in document order.
+	 *
+	 * Ensures the document is parsed and the tags query has run. The returned
+	 * ranges span the entire definition (suitable for extracting or replacing a
+	 * whole definition), unlike the name-only ranges used for go-to-definition.
+	 */
+	std::vector<TagRange> GetTagRanges();
+
 private:
 	void EnsureParser();
 	std::vector<HighlightCapture> CollectCaptures(TSNode& rootNode, const TSQuery* pQuery, int nStartLine, int nEndLine);
@@ -284,6 +313,8 @@ private:
 	bool TryGetDefinitionByteRangeAt(uint32_t byteOffset, uint32_t& defStartByte, uint32_t& defEndByte) const;
 	bool ByteOffsetToLineChar(uint32_t byteOffset, int& nLineIndex, int& nCharPos) const;
 	bool TryGetTagDefinitionByNameAt(int nLineIndex, int nCharPos, uint32_t& defStartByte, uint32_t& defEndByte) const;
+	struct TagDef;
+	bool TryBuildTagRange(const TagDef& def, TagRange& tagRange) const;
 	uint32_t NextBlockOrder() { return m_nextBlockOrder++; }
 
 	/**
@@ -354,8 +385,10 @@ private:
 	struct TagDef
 	{
 		std::wstring name;
-		uint32_t    startByte;
+		uint32_t    startByte;     // name token range (used for go-to-definition)
 		uint32_t    endByte;
+		uint32_t    defStartByte;  // full definition body range (used for semantic merge)
+		uint32_t    defEndByte;
 	};
 
 	struct TagRef

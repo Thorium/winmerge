@@ -3567,10 +3567,22 @@ CTreeSitterParser* CMergeEditView::GetTreeSitterParser()
 	if (pSyntaxParser)
 		return pSyntaxParser;
 
-	if (!m_CurSourceDef)
+	// Normally m_CurSourceDef carries the language, but when syntax highlighting is
+	// disabled the view is left on SRC_PLAIN. Resolve the language from the file
+	// extension so semantic features work regardless of the highlighting option.
+	LangServices::TextDefinition* pDef = m_CurSourceDef;
+	if (pDef == nullptr || pDef->type == LangServices::LanguageId::SRC_PLAIN)
+	{
+		String fileName = GetDocument()->m_ptBuf[m_nThisPane]->GetTempFileName();
+		String sExt;
+		paths::SplitFilename(fileName, nullptr, nullptr, &sExt);
+		if (LangServices::TextDefinition* pExtDef = LangServices::GetTextType(sExt.c_str()))
+			pDef = pExtDef;
+	}
+	if (pDef == nullptr || pDef->type == LangServices::LanguageId::SRC_PLAIN)
 		return nullptr;
 
-	m_pTreeSitterParser = TreeSitterSyntaxParserFactory::GetInstance().Create(m_CurSourceDef->type);
+	m_pTreeSitterParser = TreeSitterSyntaxParserFactory::GetInstance().Create(pDef->type);
 	if (!m_pTreeSitterParser)
 		return nullptr;
 

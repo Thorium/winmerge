@@ -25,6 +25,8 @@ PropEditor::PropEditor(COptionsMgr *optionsMgr)
 : OptionsPanel(optionsMgr, PropEditor::IDD)
 , m_bHiliteSyntax(false)
 , m_nTreeSitterMode(0)
+, m_bTreeSitterOccurrenceHighlight(false)
+, m_bTreeSitterBreadcrumb(false)
 , m_bSemanticMergeExperimental(false)
 , m_nTabType(-1)
 , m_nTabSize(0)
@@ -36,6 +38,8 @@ PropEditor::PropEditor(COptionsMgr *optionsMgr)
 	BindOption(OPT_TAB_TYPE, m_nTabType, IDC_PROP_INSERT_TABS, DDX_Radio);
 	BindOption(OPT_SYNTAX_HIGHLIGHT, m_bHiliteSyntax, IDC_HILITE_CHECK, DDX_Check);
 	BindOption(OPT_TREE_SITTER_MODE, m_nTreeSitterMode, IDC_TREE_SITTER_MODE, DDX_CBIndex);
+	BindOption(OPT_TREE_SITTER_OCCURRENCE_HIGHLIGHT, m_bTreeSitterOccurrenceHighlight, IDC_TREE_SITTER_OCCURRENCE_CHECK, DDX_Check);
+	BindOption(OPT_TREE_SITTER_BREADCRUMB, m_bTreeSitterBreadcrumb, IDC_TREE_SITTER_BREADCRUMB_CHECK, DDX_Check);
 	BindOption(OPT_SEMANTIC_MERGE_EXPERIMENTAL, m_bSemanticMergeExperimental, IDC_SEMANTIC_MERGE_CHECK, DDX_Check);
 	BindOption(OPT_ALLOW_MIXED_EOL, m_bAllowMixedEol, IDC_MIXED_EOL, DDX_Check);
 	BindOptionCustom(OPT_RENDERING_MODE, m_nRenderingMode, IDC_RENDERING_MODE, DDX_CBIndex,

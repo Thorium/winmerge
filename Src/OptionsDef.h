@@ -42,6 +42,8 @@ inline const String OPT_RESIZE_PANES {_T("Settings/AutoResizePanes"s)};
 
 inline const String OPT_SYNTAX_HIGHLIGHT {_T("Settings/HiliteSyntax"s)};
 inline const String OPT_TREE_SITTER_MODE {_T("Settings/TreeSitterMode"s)};
+inline const String OPT_TREE_SITTER_OCCURRENCE_HIGHLIGHT {_T("Settings/TreeSitterOccurrenceHighlight"s)};
+inline const String OPT_TREE_SITTER_BREADCRUMB {_T("Settings/TreeSitterBreadcrumb"s)};
 inline const String OPT_SEMANTIC_MERGE_EXPERIMENTAL {_T("Settings/SemanticMergeExperimental"s)};
 inline const String OPT_AUTO_MERGE_SEMANTIC_FALLBACK {_T("Settings/AutoMergeSemanticFallback"s)};
 inline const String OPT_VIEW_WHITESPACE {_T("Settings/ViewWhitespace"s)};

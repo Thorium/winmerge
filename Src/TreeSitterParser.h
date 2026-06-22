@@ -296,6 +296,20 @@ public:
 	 */
 	std::vector<TagRange> GetTagRanges();
 
+	/**
+	 * @brief Get a breadcrumb of the enclosing named definitions at a position.
+	 * @return Outermost-to-innermost symbol names joined by '.', at most 3 deep,
+	 *         or empty if the caret is not inside any named definition with a body.
+	 */
+	std::wstring GetEnclosingSymbols(int nLineIndex, int nCharPos) const;
+
+	/**
+	 * @brief Get the AST-confirmed identifier token under a position.
+	 * @return The identifier text, or empty if the position is not on an
+	 *         identifier (e.g. a comment, string or keyword).
+	 */
+	std::wstring GetIdentifierAt(int nLineIndex, int nCharPos) const;
+
 private:
 	void EnsureParser();
 	std::vector<HighlightCapture> CollectCaptures(TSNode& rootNode, const TSQuery* pQuery, int nStartLine, int nEndLine);
@@ -426,7 +440,7 @@ public:
 	 *                     If empty, uses "<exe_dir>/TreeSitterGrammars/".
 	 *
 	 * This only discovers available DLL filenames. Grammars are loaded
-	 * lazily on first request via GetLanguageForExt().
+	 * lazily on first request via GetLanguageForName().
 	 */
 	void Initialize(const std::wstring& sGrammarDir = L"");
 

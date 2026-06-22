@@ -35,6 +35,8 @@
 #include "Constants.h"
 #include "MouseHook.h"
 #include "TreeSitterParser.h"
+#include "ccrystaltextmarkers.h"
+#include "FindTextHelper.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -3025,6 +3027,8 @@ void CMergeEditView::OnUpdateCaret()
 		curChar, chars, selectedLines, selectedChars,
 		sEol, GetDocument()->m_ptBuf[m_nThisPane]->getCodepage(), GetDocument()->m_ptBuf[m_nThisPane]->getHasBom());
 
+	UpdateTreeSitterStatus(cursorPos, (dwLineFlags & LF_GHOST) != 0);
+
 	// Is cursor inside difference?
 	if (dwLineFlags & LF_NONTRIVIAL_DIFF)
 		m_bCurrentLineIsDiff = true;
@@ -3589,6 +3593,68 @@ CTreeSitterParser* CMergeEditView::GetTreeSitterParser()
 	m_pTreeSitterParser->SetTextBuffer(GetDocument()->m_ptBuf[m_nThisPane].get());
 
 	return dynamic_cast<CTreeSitterParser *>(m_pTreeSitterParser.get());
+}
+
+/**
+ * @brief Update the caret-following tree-sitter UI: the status-bar
+ *        enclosing-symbol breadcrumb and the symbol-occurrence highlight.
+ *
+ * Both run on every caret move, so each is individually gated by an option
+ * (OPT_TREE_SITTER_BREADCRUMB / OPT_TREE_SITTER_OCCURRENCE_HIGHLIGHT) and the
+ * AST work is skipped entirely when the corresponding feature is disabled.
+ */
+void CMergeEditView::UpdateTreeSitterStatus(const CEPoint& cursorPos, bool bGhostLine)
+{
+	CMergeDoc* pDoc = GetDocument();
+	const bool bBreadcrumb = GetOptionsMgr()->GetBool(OPT_TREE_SITTER_BREADCRUMB);
+	const bool bOccurrences = GetOptionsMgr()->GetBool(OPT_TREE_SITTER_OCCURRENCE_HIGHLIGHT);
+
+	CTreeSitterParser* pParser = (pDoc->IsTreeSitterEnabled() && (bBreadcrumb || bOccurrences)) ?
+		pDoc->GetTreeSitterParser(m_nThisPane) : nullptr;
+
+	String sParser, sSymbol, sIdentifier;
+	if (pParser != nullptr && pParser->HasLanguage())
+	{
+		pParser->EnsureParsed();
+		if (const CTreeSitterLanguage* pLang = pParser->GetLanguage())
+			sParser = pLang->GetName();
+		if (!bGhostLine)
+		{
+			if (bBreadcrumb)
+				sSymbol = pParser->GetEnclosingSymbols(cursorPos.y, cursorPos.x);
+			if (bOccurrences)
+				sIdentifier = pParser->GetIdentifierAt(cursorPos.y, cursorPos.x);
+		}
+	}
+
+	// Status-bar breadcrumb: show "[TS:lang > symbol]" only when enabled.
+	if (m_piMergeEditStatus != nullptr)
+		m_piMergeEditStatus->SetSyntaxParser(bBreadcrumb ? sParser.c_str() : _T(""), sSymbol.c_str());
+
+	// Highlight all occurrences of the identifier under the cursor using a
+	// transient (non-user-defined, not persisted) marker shared by all panes.
+	// Compare against the live marker table (not a cached copy) so external
+	// marker-table changes cannot leave this logic out of sync. When the
+	// feature is disabled sIdentifier stays empty, which clears any stale marker.
+	if (CCrystalTextMarkers* pMarkers = theApp.GetMainMarkers())
+	{
+		static const tchar_t MARKER_KEY[] = _T("TREESITTER_SYMBOL");
+		const auto& markers = static_cast<const CCrystalTextMarkers*>(pMarkers)->GetMarkers();
+		const auto it = markers.find(MARKER_KEY);
+		const bool bUnchanged = (it != markers.end()) ?
+			(it->second.sFindWhat == sIdentifier.c_str()) : sIdentifier.empty();
+		if (!bUnchanged)
+		{
+			if (sIdentifier.empty())
+				pMarkers->DeleteMarker(MARKER_KEY);
+			else
+				pMarkers->SetMarker(MARKER_KEY, sIdentifier.c_str(),
+					FIND_MATCH_CASE | FIND_WHOLE_WORD, COLORINDEX_MARKERBKGND0, false);
+			// Markers only change colors; a repaint of the attached views is
+			// enough -- UpdateViews() would reset every view's parse cookies.
+			pMarkers->InvalidateViews();
+		}
+	}
 }
 
 void CMergeEditView::GotoTreeSitterDefinition()

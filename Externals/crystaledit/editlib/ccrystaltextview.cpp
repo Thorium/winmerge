@@ -329,8 +329,6 @@ DoSetTextType (LangServices::TextDefinition *def)
 bool CCrystalTextView::
 SetTextType (const tchar_t* pszExt)
 {
-  m_CurSourceDef = LangServices::GetTextType (LangServices::LanguageId::SRC_PLAIN);
-
   LangServices::TextDefinition *def = LangServices::GetTextType (pszExt);
 
   return SetTextType (def);
@@ -339,10 +337,7 @@ SetTextType (const tchar_t* pszExt)
 bool CCrystalTextView::
 SetTextType (LangServices::LanguageId enuType)
 {
-  LangServices::TextDefinition *def;
-
-  m_CurSourceDef = def = LangServices::GetTextType (LangServices::LanguageId::SRC_PLAIN);
-  def = LangServices::GetTextType(enuType);
+  LangServices::TextDefinition *def = LangServices::GetTextType(enuType);
   if (def)
     return SetTextType (def);
   return false;
@@ -2711,10 +2706,11 @@ OnDraw (CDC * pdc)
       rcLine.bottom = (std::min)(rcClient.bottom, rcLine.top + nSubLines * nLineHeight);
       rcMargin.bottom = rcLine.bottom;
 
+      bool bLineVisible = nCurrentLine < nLineCount && GetLineVisible(nCurrentLine);
       CRect rcMarginAndLine(rcClient.left, rcLine.top, rcClient.right, rcLine.bottom);
-      if (pdc->RectVisible(rcMarginAndLine))
+      if (bLineVisible)
         {
-          if (nCurrentLine < nLineCount && GetLineVisible (nCurrentLine))
+          if (pdc->RectVisible(rcMarginAndLine))
             {
               DrawMargin (rcMargin, nCurrentLine, nCurrentLine + 1);
               DrawSingleLine (rcLine, nCurrentLine);
@@ -2727,7 +2723,10 @@ OnDraw (CDC * pdc)
                   nCursorY + nLineHeight - 1, 1);
               nLastLineBottom = rcMargin.bottom;
             }
-          else
+        }
+      else
+        {
+          if (nCurrentLine >= nLineCount && pdc->RectVisible(rcMarginAndLine))
             {
               DrawMargin (rcMargin, -1, -1);
               DrawSingleLine (rcLine, -1);
@@ -3638,7 +3637,7 @@ OnPrint (CDC * pdc, CPrintInfo * pInfo)
 // CCrystalTextView message handlers
 
 int CCrystalTextView::
-GetLineCount ()
+GetLineCount () const
 {
   if (m_pTextBuffer == nullptr)
     return 1;                   //  Single empty line
@@ -5084,7 +5083,11 @@ UpdateView (CCrystalTextView * pSource, CUpdateContext * pContext,
       CEPoint ptTopLine (0, m_nTopLine);
       pContext->RecalcPoint (ptTopLine);
       ASSERT_VALIDTEXTPOS (ptTopLine);
-      m_nTopLine = ptTopLine.y;
+      if (m_nTopLine != ptTopLine.y)
+        {
+          m_nTopLine = ptTopLine.y;
+          m_nTopSubLine = GetSubLineIndex (m_nTopLine);
+        }
       UpdateCaret ();
     }
 

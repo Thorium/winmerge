@@ -90,6 +90,22 @@ struct DIFFOPTIONS
 	bool bIgnoreMissingTrailingEol; /**< Ignore missing trailing EOL -option. */
 	bool bIgnoreLineBreaks; /**< Ignore line breaks (treat as spaces) -option. */
 	bool bIgnoreTrailingPunctuation = false; /**< Ignore trailing comma/semicolon differences -option. */
+
+	bool operator==(const DIFFOPTIONS& other) const
+	{
+		return nIgnoreWhitespace == other.nIgnoreWhitespace &&
+			nDiffAlgorithm == other.nDiffAlgorithm &&
+			bIgnoreCase == other.bIgnoreCase &&
+			bIgnoreNumbers == other.bIgnoreNumbers &&
+			bIgnoreBlankLines == other.bIgnoreBlankLines &&
+			bIgnoreEol == other.bIgnoreEol &&
+			bFilterCommentsLines == other.bFilterCommentsLines &&
+			bIndentHeuristic == other.bIndentHeuristic &&
+			bCompletelyBlankOutIgnoredChanges == other.bCompletelyBlankOutIgnoredChanges &&
+			bIgnoreMissingTrailingEol == other.bIgnoreMissingTrailingEol &&
+			bIgnoreLineBreaks == other.bIgnoreLineBreaks &&
+			bIgnoreTrailingPunctuation == other.bIgnoreTrailingPunctuation;
+	}
 };
 
 /**

@@ -28,6 +28,7 @@
 #include "DarkModeLib.h"
 #include "WindowsManager.h"
 #include "TempFile.h"
+#include "FrameType.h"
 
 class BCMenu;
 class CDirView;
@@ -35,6 +36,7 @@ class COpenDoc;
 struct IDirDoc;
 class CDirDoc;
 class CMergeDoc;
+class CMergeEditFrame;
 class CHexMergeDoc;
 class CMergeEditView;
 class SyntaxColors;
@@ -50,6 +52,7 @@ class COutputDoc;
 class CTempPathContext;
 
 typedef std::shared_ptr<TempFile> TempFilePtr;
+typedef std::shared_ptr<TempFolder> TempFolderPtr;
 
 // typed lists (homogenous pointer lists)
 typedef CTypedPtrList<CPtrList, COpenDoc *> OpenDocList;
@@ -75,15 +78,7 @@ public:
 	/**
 	 * @brief Frame/View/Document types.
 	 */
-	enum FRAMETYPE
-	{
-		FRAME_FOLDER, /**< Folder compare frame. */
-		FRAME_FILE, /**< File compare frame. */
-		FRAME_HEXFILE, /**< Hex file compare frame. */
-		FRAME_IMGFILE, /**< Image file compare frame. */
-		FRAME_WEBPAGE, /**< Web page compare frame. */
-		FRAME_OTHER, /**< No frame? */
-	};
+	using FRAMETYPE = ::FRAMETYPE;
 
 	struct OpenParams
 	{
@@ -149,18 +144,20 @@ public:
 // Attributes
 public:	
 	bool m_bShowErrors; /**< Show folder compare error items? */
-	static const tchar_t szClassName[];
 
 // Operations
 public:
 	HMENU NewDirViewMenu();
 	HMENU NewMergeViewMenu();
+	HMENU NewMergeViewResultView2WayMenu();
+	HMENU NewMergeViewResultView3WayMenu();
 	HMENU NewHexMergeViewMenu();
 	HMENU NewImgMergeViewMenu();
 	HMENU NewWebPageDiffViewMenu();
 	HMENU NewOpenViewMenu();
 	HMENU NewDefaultMenu(int ID = 0);
-	void UpdatePrediffersMenu(CMenu* pPredifferMenu);
+
+	static void GenerateDocumentReport(const std::vector<IMergeDoc*>& docs, const String& sReportFile);
 
 	bool DoFileOrFolderOpen(const PathContext *pFiles = nullptr,
 		const fileopenflags_t dwFlags[] = nullptr, const String strDesc[] = nullptr,
@@ -222,6 +219,7 @@ public:
 		const PackingInfo* infoUnpacker = nullptr, const PrediffingInfo* infoPrediffer = nullptr,
 		const OpenFolderParams* pOpenParams = nullptr, CTempPathContext* pTempPathContext = nullptr);
 
+	void UpdateToolbar();
 	void UpdateTitleBarAndTabBar();
 	void UpdateResources();
 	void ApplyDiffOptions();
@@ -231,9 +229,7 @@ public:
 	static FRAMETYPE GetFrameType(const CFrameWnd * pFrame);
 	static void UpdateDocTitle();
 	static void ReloadMenu();
-	static void AppendPluginMenus(CMenu* pMenu, const String& filteredFilenames,
-		const std::vector<std::wstring>& events, bool addAllMenu, unsigned baseId);
-	static String GetPluginPipelineByMenuId(unsigned idSearch, const std::vector<std::wstring>& events, unsigned baseId);
+	static void UpdateMergeViewMenu(CMergeEditFrame* pFrame);
 	DropHandler *GetDropHandler() const { return m_pDropHandler; }
 	CWindowsManager& GetWindowsManager() { return m_wndManager; }
 	IMergeDoc* GetActiveIMergeDoc();
@@ -245,6 +241,11 @@ public:
 	static void WaitAndDoMessageLoop(bool& completed, int ms);
 	void OutputLog(Logger::LogLevel level, const std::chrono::system_clock::time_point& tp, const String& msg, bool show);
 	void AddTempFile(const TempFilePtr& pTempFile) { m_tempFiles.push_back(pTempFile); }
+	void AddTempFolder(const TempFolderPtr& pTempFolder) { m_tempFolders.push_back(pTempFolder); }
+	MergeDocList &GetAllMergeDocs();
+	DirDocList &GetAllDirDocs();
+	std::vector<IMergeDoc*> GetAllMergeDocuments();
+	void OnToolsGenerateReport();
 
 // Overrides
 	virtual void GetMessageString(UINT nID, CString& rMessage) const;
@@ -309,7 +310,7 @@ protected:
 					SetRedraw(FALSE);
 				}
 				LRESULT result = CWnd::WindowProc(message, wParam, lParam);
-				if (CMainFrame* pMainFrame = (CMainFrame*)AfxGetMainWnd())
+				if (auto* pMainFrame = GetMainFrame())
 				{
 					if (message == WM_MDICREATE)
 						pMainFrame->GetWindowsManager().AddChildFrame((CMDIChildWnd*)CWnd::FromHandle(reinterpret_cast<HWND>(result)));
@@ -320,13 +321,20 @@ protected:
 			}
 			case WM_MDIDESTROY:
 			{
-				CMDIChildWnd* pChild = (CMDIChildWnd*)CWnd::FromHandle(reinterpret_cast<HWND>(wParam));
-				((CMainFrame*)AfxGetMainWnd())->GetWindowsManager().RemoveChildFrame(pChild);
+				if (auto* pMainFrame = GetMainFrame())
+				{
+					CMDIChildWnd* pChild = (CMDIChildWnd*)CWnd::FromHandle(reinterpret_cast<HWND>(wParam));
+					pMainFrame->GetWindowsManager().RemoveChildFrame(pChild);
+				}
 				break;
 			}
 			case WM_MDISETMENU:
-				GetMainFrame()->SetMenuBarState(AFX_MBS_HIDDEN);
-				GetMainFrame()->GetMenuBar()->AttachMenu(CMenu::FromHandle(reinterpret_cast<HMENU>(wParam)));
+				if (auto* pMainFrame = GetMainFrame())
+				{
+					pMainFrame->SetMenuBarState(AFX_MBS_HIDDEN);
+					pMainFrame->GetMenuBar()->AttachMenu(CMenu::FromHandle(reinterpret_cast<HMENU>(wParam)));
+					pMainFrame->UpdateToolbar();
+				}
 				return TRUE;
 				break;
 			case WM_TIMER:
@@ -346,6 +354,8 @@ protected:
 	{
 		MENU_DEFAULT,
 		MENU_MERGEVIEW,
+		MENU_MERGEVIEW_RESULTVIEW_2WAY,
+		MENU_MERGEVIEW_RESULTVIEW_3WAY,
 		MENU_DIRVIEW,
 		MENU_HEXMERGEVIEW,
 		MENU_IMGMERGEVIEW,
@@ -382,9 +392,15 @@ protected:
 
 	static const MENUITEM_ICON m_MenuIcons[];
 
-	std::unique_ptr<BCMenu> m_pMenus[MENU_COUNT]; /**< Menus for different views */
+	BCMenu* m_pMenus[MENU_COUNT] = {}; /**< Current menus for different views */
+	std::unique_ptr<BCMenu> m_pMergeResult2WayMenu;
+	std::unique_ptr<BCMenu> m_pMergeResult3WayMenu;
 	std::unique_ptr<BCMenu> m_pImageMenu;
 	std::unique_ptr<BCMenu> m_pWebPageMenu;
+	std::vector<std::unique_ptr<BCMenu>> m_ownedMenus; /**< Keep menus alive while frames may reference their handles */
+	HMENU m_hMenuMergeView = nullptr;
+	HMENU m_hMenuMergeViewResult2Way = nullptr;
+	HMENU m_hMenuMergeViewResult3Way = nullptr;
 	std::vector<TempFilePtr> m_tempFiles; /**< List of possibly needed temp files. */
 	std::vector<std::shared_ptr<TempFolder>> m_tempFolders; /**< Temp folders for "New Folder" comparisons. */
 	DropHandler *m_pDropHandler;
@@ -409,6 +425,7 @@ protected:
 	afx_msg void OnHelpContents();
 	afx_msg void OnClose();
 	afx_msg void OnToolsGeneratePatch();
+	afx_msg void OnToolsGenerateArchive();
 	afx_msg void OnDropFiles(const std::vector<String>& files);
 	afx_msg void OnUpdatePluginUnpackMode(CCmdUI* pCmdUI);
 	afx_msg void OnPluginUnpackMode(UINT nID);
@@ -485,31 +502,33 @@ protected:
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnDestroy();
 	afx_msg void OnAccelQuit();
-	afx_msg LRESULT OnChildFrameAdded(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnChildFrameRemoved(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnChildFrameActivate(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnChildFrameActivated(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnUpdateMenuBarMenuItem(CCmdUI* pCmdUI);
 	afx_msg void OnViewMenuBar();
 	afx_msg void OnUpdateViewMenuBar(CCmdUI* pCmdUI);
 	afx_msg void OnViewOutputBar();
 	afx_msg void OnUpdateViewOutputBar(CCmdUI* pCmdUI);
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
-    afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
+	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
+	afx_msg void OnMergingMode();
+	afx_msg void OnUpdateMergingMode(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateMergingStatus(CCmdUI* pCmdUI);
+	afx_msg void OnStatusBarClick(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg LRESULT OnMDIButtonContextMenu(WPARAM wParam, LPARAM lParam);
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 
 private:
 	OpenDocList &GetAllOpenDocs();
-	MergeDocList &GetAllMergeDocs();
-	DirDocList &GetAllDirDocs();
 	HexMergeDocList &GetAllHexMergeDocs();
 	std::vector<CImgMergeFrame *> GetAllImgMergeFrames();
 	std::vector<CWebPageDiffFrame *> GetAllWebPageDiffFrames();
 	void UpdateFont(FRAMETYPE frame);
 	BOOL CreateToolbar();
 	CMergeEditView * GetActiveMergeEditView();
+	CSize GetToolbarButtonSize() const;
 	void LoadToolbarImages();
+	void UpdateToolbarBandSize();
+	std::vector<UINT> GetToolbarButtons();
 	HMENU NewMenu( int view, int ID );
 	bool CompareFilesIfFilesAreLarge(IDirDoc* pDirDoc, int nFiles, const FileLocation ifileloc[]);
 	void UpdateSystemMenu();
@@ -518,4 +537,6 @@ private:
 	void ProcessLog();
 	std::unique_ptr<WCHAR[]> m_upszLongTextW;
 	std::unique_ptr<CHAR[]> m_upszLongTextA;
+	HICON m_hIconPlugin;
+	std::vector<UINT> m_toolbarButtons;
 };

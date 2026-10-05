@@ -212,6 +212,12 @@
         </row>
 
         <row>
+          <entry><keycap>F12</keycap></entry>
+
+          <entry>定義へ移動</entry>
+        </row>
+
+        <row>
           <entry><keycombo> <keycap>Ctrl</keycap> <keycap>B</keycap> </keycombo></entry>
 
           <entry>列選択を開始します</entry>
@@ -248,6 +254,27 @@
 </keycombo></entry>
 
           <entry>左側と中央の間の移動した行に移動します (3 つのペイン)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>1</keycap>
+</keycombo></entry>
+
+          <entry>現在の差異または選択した差異の左ペインの内容を切り替え（マージ結果ペイン）</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>2</keycap>
+</keycombo></entry>
+
+          <entry>現在の差異または選択した差異の2番目のペインの内容(2-wayでは右側、3-wayでは中央)を切り替え（マージ結果ペイン）</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>3</keycap>
+</keycombo></entry>
+
+          <entry>現在の差異または選択した差異の右ペインの内容を切り替え（マージ結果ペイン）</entry>
         </row>
 
         <row>

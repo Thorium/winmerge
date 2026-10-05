@@ -106,13 +106,13 @@ pantalla)</entry>
           <entry><keycombo> <keycap>Alt</keycap> <keycap>Flecha izquierda</keycap>
 </keycombo></entry>
 
-          <entry>Copy selected items from right to left</entry>
+          <entry>Copiar los elementos seleccionados del derecho al izquierdo</entry>
         </row>
 
         <row>
           <entry><keycombo> <keycap>Alt</keycap> <keycap>Flecha derecha</keycap> </keycombo></entry>
 
-          <entry>Copia los elementos seleccionados del derecho al izquierdo</entry>
+          <entry>Copia los elementos seleccionados del izquierdo al derecho</entry>
         </row>
       </tbody>
     </tgroup>
@@ -216,6 +216,12 @@ pantalla)</entry>
         </row>
 
         <row>
+          <entry><keycap>F12</keycap></entry>
+
+          <entry>Ir a la definición</entry>
+        </row>
+
+        <row>
           <entry><keycombo> <keycap>Ctrl</keycap> <keycap>B</keycap> </keycombo></entry>
 
           <entry>Inicia selección de columna</entry>
@@ -252,6 +258,30 @@ pantalla)</entry>
 </keycombo></entry>
 
           <entry>Va a la línea desplazada entre el lado izquierdo y el central (3 paneles)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>1</keycap>
+</keycombo></entry>
+
+          <entry>Toggle left pane content for current or selected differences (Merge Result
+pane)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>2</keycap>
+</keycombo></entry>
+
+          <entry>Toggle pane 2 content (right in two-way, middle in three-way)  for current
+or selected differences (Merge Result pane)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>3</keycap>
+</keycombo></entry>
+
+          <entry>Toggle right pane content for current or selected differences (Merge Result
+pane)</entry>
         </row>
 
         <row>
@@ -455,7 +485,7 @@ siguiente</entry>
   </table>
 
   <table>
-    <title>Find and Replace</title>
+    <title>Buscar y sustituir</title>
 
     <tgroup cols="2">
       <thead>

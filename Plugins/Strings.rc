@@ -127,9 +127,9 @@ BEGIN
                             "Tokenize. \r\nUsage: Tokenize PATTERNS\r\n PATTERNS - regex (e.g. [^\\w]+)"
     IDS_PLUGIN_DESCRIPTION12 "Trim spaces"
     IDS_PLUGIN_DESCRIPTION13 
-                            "Select columns.\r\nUsage: SelectColumns RANGES\r\n or: SelectColumns [-v] [-i] [-g] -e PATTERNS\r\n RANGES - column ranges (-3,5-10,30-)\r\n PATTERNS - regex\r\n -v - select non-matching\r\n -i - ignore case\r\n -g - enable global flag\r\n -e - use PATTERNS"
+                            "Select columns.\r\nUsage: SelectColumns RANGES\r\n or: SelectColumns [-v] [-i] [-g] -e PATTERNS\r\n or: SelectColumns [-v] [-i] -F STRING\r\n RANGES - column ranges (-3,5-10,30-)\r\n PATTERNS - regex\r\n STRING - string to match literally\r\n -v - select non-matching\r\n -i - ignore case\r\n -g - enable global flag\r\n -e - use PATTERNS\r\n -F - use fixed string for matching"
     IDS_PLUGIN_DESCRIPTION14 
-                            "Select lines.\r\nUsage: SelectLines RANGES\r\n or: SelectLines [-v] [-i] -e PATTERNS\r\n RANGES - line ranges (-3,5-10,30-)\r\n PATTERNS - regex\r\n -v - select non-matching\r\n -i - ignore case\r\n -e - use PATTERNS"
+                            "Select lines.\r\nUsage: SelectLines RANGES\r\n or: SelectLines [-v] [-i] -e PATTERNS\r\n or: SelectLines [-v] [-i] -F STRING\r\n RANGES - line ranges (-3,5-10,30-)\r\n PATTERNS - regex\r\n STRING - string to match literally\r\n -v - select non-matching\r\n -i - ignore case\r\n -e - use PATTERNS\r\n -F - use fixed string for matching"
 END
 
 STRINGTABLE
@@ -199,7 +199,7 @@ BEGIN
                             "Windows Registry URL Scheme Handler.\r\nArguments: reg.exe command line options."
     IDS_PLUGIN_DESCRIPTION54 "Basic text functions"
     IDS_PLUGIN_DESCRIPTION55 "AI-assisted text conversion"
-    IDS_PLUGIN_DESCRIPTION56 "Text converter (OpenAI API).\r\nUsage: AIConvertText PROMPT"
+    IDS_PLUGIN_DESCRIPTION56 "Text converter (OpenAI-compatible API).\r\nUsage: AIConvertText PROMPT"
     IDS_PLUGIN_DESCRIPTION57 "Unescape and display escaped Java properties files."
     IDS_PLUGIN_DESCRIPTION58 "Java decompiler (CFR).\r\nDecompiles .class files into readable Java source code.\r\nArguments: CFR command line options."
     IDS_PLUGIN_DESCRIPTION59 
@@ -323,11 +323,11 @@ BEGIN
     IDS_PLUGIN_EDITORADDIN_STR2
                             "Enter prompt"
     IDS_PLUGIN_EDITORADDIN_STR3 
-                            "Enter OpenAI API key.\r\n- Requires OpenAI registration (fees may apply).\r\n- Key stored in env var %1."
+                            "Enter API key.\r\n- Registration with the selected provider may be required (fees may apply).\r\n- Key stored in env var %1."
     IDS_PLUGIN_EDITORADDIN_STR4
-                            "Environment variable name for OpenAI API key"
+                            "Environment variable name for API key"
     IDS_PLUGIN_EDITORADDIN_STR5
-                            "OpenAI API key"
+                            "API key"
     IDS_PLUGIN_EDITORADDIN_STR6
                             "Temperature"
     IDS_PLUGIN_EDITORADDIN_STR7
@@ -335,7 +335,13 @@ BEGIN
     IDS_PLUGIN_EDITORADDIN_STR8
                             "Model"
     IDS_PLUGIN_EDITORADDIN_STR9
-                            "OpenAI API key changed. Restart to apply."
+                            "API key changed. Restart to apply."
+    IDS_PLUGIN_EDITORADDIN_STR10
+                            "Provider"
+    IDS_PLUGIN_EDITORADDIN_STR11
+                            "Base URL"
+    IDS_PLUGIN_EDITORADDIN_STR12
+                            "(pick a preset to fill in the field above)"
 END
 
 #endif    // English (United States) resources
@@ -352,4 +358,3 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
-

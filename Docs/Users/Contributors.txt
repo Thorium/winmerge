@@ -29,6 +29,9 @@ Localization:
 * Arabic:
   Downzen team <https://downzen.com>
 
+* Azerbaijani
+  Jamal Ali
+
 * Basque:
   Xabier Aramendi <Azpidatziak@gmail.com>
 
@@ -51,6 +54,7 @@ Localization:
   YFdyh000 <yfdyh000 at gmail.com>
   CharlesMengCA <CharlesMeng at outlook.com>
   Yin Gang <zenith.yin at gmail.com>
+  zuoyuanchun
 
 * Traditional Chinese:
   Koko <kokokoko@giga.net.tw>
@@ -116,6 +120,9 @@ Localization:
   Mihalicza József <jmihalicza@gmail.com>
   Egyed Ferenc <efi99 at freemail.hu>
   boglarkla
+
+* Indonesian:
+  Yoruxyv
 
 * Italian:
   Andrea Decorte <deco1985@hotmail.com>
@@ -315,6 +322,7 @@ Other Contributors (code, ideas, testing..):
 * ozone10 (darkmodelib)
 * Anthony Lee Stark
 * Gaurav Pasi
+* Ikkoru
 
 WinMerge includes code from:
 * Jared Breland <jbreland@legroom.net> (Installer's modpath script)
@@ -357,7 +365,10 @@ External components used by WinMerge
 * Inno Setup (https://jrsoftware.org/files/is/license.txt) (https://jrsoftware.org/isinfo.php)
 * tree-sitter (MIT) (https://github.com/tree-sitter/tree-sitter)
   * tree-sitter-fsharp     (MIT) (https://github.com/ionide/tree-sitter-fsharp)
+  * tree-sitter-ini        (MIT) (https://github.com/justinmk/tree-sitter-ini)
   * tree-sitter-markdown   (MIT) (https://github.com/tree-sitter-grammars/tree-sitter-markdown)
+  * tree-sitter-properties (MIT) (https://github.com/tree-sitter-grammars/tree-sitter-properties)
+  * tree-sitter-toml       (MIT) (https://github.com/tree-sitter-grammars/tree-sitter-toml)
   * tree-sitter-xml        (MIT) (https://github.com/tree-sitter-grammars/tree-sitter-xml)
   * tree-sitter-yaml       (MIT) (https://github.com/tree-sitter-grammars/tree-sitter-yaml)
   * tree-sitter-c          (MIT) (https://github.com/tree-sitter/tree-sitter-c)

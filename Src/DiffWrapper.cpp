@@ -40,6 +40,7 @@
 #include "cio.h"
 #include "SyntaxParserRegistry.h"
 #include "SyntaxParserHelper.h"
+#include "TableProps.h"
 
 using Poco::Exception;
 
@@ -427,31 +428,38 @@ int CDiffWrapper::PostFilter(PostFilterContext& ctxt, change* thisob, const file
 	
 	std::string lineDataLeft, lineDataRight;
 	std::vector<bool> allTextIsCommentLeft(qtyLinesLeft), allTextIsCommentRight(qtyLinesRight);
+	bool doFilterComments = m_options.m_filterCommentsLines && m_pFilterCommentsDef != nullptr;
 
-	if (m_options.m_filterCommentsLines && m_pFilterCommentsDef != nullptr)
+	if (doFilterComments)
 	{
-		if (ctxt.m_pSyntaxParser[0] == nullptr)
+		if (!ctxt.m_bSyntaxParserInitialized[0])
 		{
 			ctxt.m_pSyntaxParser[0] = LangServices::SyntaxParserRegistry::GetInstance().CreateParser(m_pFilterCommentsDef->type);
 			ctxt.m_pTextBuffer[0] = CreateTextBuffer(file_data_ary[0]);
 			if (ctxt.m_pSyntaxParser[0] && ctxt.m_pTextBuffer[0])
 				ctxt.m_pSyntaxParser[0]->SetTextBuffer(ctxt.m_pTextBuffer[0].get());
+			ctxt.m_bSyntaxParserInitialized[0] = true;
 		}
-		if (ctxt.m_pSyntaxParser[1] == nullptr)
+		if (!ctxt.m_bSyntaxParserInitialized[1])
 		{
 			ctxt.m_pSyntaxParser[1] = LangServices::SyntaxParserRegistry::GetInstance().CreateParser(m_pFilterCommentsDef->type);
 			ctxt.m_pTextBuffer[1] = CreateTextBuffer(file_data_ary[1]);
 			if (ctxt.m_pSyntaxParser[1] && ctxt.m_pTextBuffer[1])
 				ctxt.m_pSyntaxParser[1]->SetTextBuffer(ctxt.m_pTextBuffer[1].get());
+			ctxt.m_bSyntaxParserInitialized[1] = true;
 		}
-		ctxt.nParsedLineEndLeft = lineNumberLeft + qtyLinesLeft - 1;
-		ctxt.nParsedLineEndRight = lineNumberRight + qtyLinesRight - 1;
+	}
+
+	if (doFilterComments && ctxt.m_pSyntaxParser[0] && ctxt.m_pSyntaxParser[1])
+	{
+		int nLineEndLeft = lineNumberLeft + qtyLinesLeft - 1;
+		int nLineEndRight = lineNumberRight + qtyLinesRight - 1;
 
 		// Use SyntaxParserHelper for unified comment filtering
 		lineDataLeft = SyntaxParserHelper::GetCommentsFilteredText(
-			ctxt.m_pSyntaxParser[0].get(), lineNumberLeft, ctxt.nParsedLineEndLeft, allTextIsCommentLeft); 
+			ctxt.m_pSyntaxParser[0].get(), lineNumberLeft, nLineEndLeft, allTextIsCommentLeft); 
 		lineDataRight = SyntaxParserHelper::GetCommentsFilteredText(
-			ctxt.m_pSyntaxParser[1].get(), lineNumberRight, ctxt.nParsedLineEndRight, allTextIsCommentRight);
+			ctxt.m_pSyntaxParser[1].get(), lineNumberRight, nLineEndRight, allTextIsCommentRight);
 	}
 	else
 	{
@@ -828,6 +836,9 @@ bool CDiffWrapper::RunFileDiff()
 	if (m_bUseDiffList)
 		m_nDiffs = m_pDiffList->GetSize();
 
+	PluginPipelineContext pipelineContext;
+	pipelineContext.filteredFilenames = m_sToFindPrediffer;
+
 	for (file = 0; file < aFiles.GetSize(); file++)
 	{
 		if (m_bPluginsEnabled)
@@ -839,7 +850,9 @@ bool CDiffWrapper::RunFileDiff()
 
 			// this can only fail if the data can not be saved back (no more
 			// place on disk ???) What to do then ??
-			if (m_infoPrediffer && !m_infoPrediffer->Prediffing(file, strFileTemp[file], m_sToFindPrediffer, m_bPathsAreTemp, { strFileTemp[file] }))
+			pipelineContext.variables = { strFileTemp[file] };
+			pipelineContext.tableProps = m_tableProps[file];
+			if (m_infoPrediffer && !m_infoPrediffer->Prediffing(file, strFileTemp[file], m_bPathsAreTemp, pipelineContext))
 			{
 				// display a message box
 				String sError = strutils::format_string2(
@@ -1425,13 +1438,22 @@ CDiffWrapper::LoadWinMergeDiffsFromDiffUtilsScript(struct change * script, const
 						last1 = first1 + thisob->inserted - 1;
 						translate_range (&file_data_ary[0], first0, last0, &trans_a0, &trans_b0);
 						translate_range (&file_data_ary[1], first1, last1, &trans_a1, &trans_b1);
-						const int qtyLinesLeft = (trans_b0 - trans_a0) + 1
-							- ((!thisob->link && file_data_ary[0].missing_newline) ? 1 : 0); //Determine quantity of lines in this block for left side
-						const int qtyLinesRight = (trans_b1 - trans_a1) + 1
-							- ((!thisob->link && file_data_ary[1].missing_newline) ? 1 : 0); //Determine quantity of lines in this block for right side
-
 						if (op == OP_TRIVIAL && m_options.m_bCompletelyBlankOutIgnoredDiffereneces)
 						{
+							const bool adjustLeftForMissingNewline =
+								!thisob->link &&
+								thisob->deleted > 0 &&
+								thisob->line0 + thisob->deleted == file_data_ary[0].valid_lines &&
+								file_data_ary[0].missing_newline;
+							const bool adjustRightForMissingNewline =
+								!thisob->link &&
+								thisob->inserted > 0 &&
+								thisob->line1 + thisob->inserted == file_data_ary[1].valid_lines &&
+								file_data_ary[1].missing_newline;
+							const int qtyLinesLeft = (trans_b0 - trans_a0) + 1
+								- (adjustLeftForMissingNewline ? 1 : 0); // Determine quantity of lines in this block for left side
+							const int qtyLinesRight = (trans_b1 - trans_a1) + 1
+								- (adjustRightForMissingNewline ? 1 : 0); // Determine quantity of lines in this block for right side
 							if (qtyLinesLeft == qtyLinesRight)
 							{
 								op = OP_NONE;
@@ -1452,12 +1474,22 @@ CDiffWrapper::LoadWinMergeDiffsFromDiffUtilsScript(struct change * script, const
 				{
 					if (thisob->trivial)
 						op = OP_TRIVIAL;
-					const int qtyLinesLeft = (trans_b0 - trans_a0) + 1
-						- ((!thisob->link && file_data_ary[0].missing_newline) ? 1 : 0); //Determine quantity of lines in this block for left side
-					const int qtyLinesRight = (trans_b1 - trans_a1) + 1
-						- ((!thisob->link && file_data_ary[1].missing_newline) ? 1 : 0); //Determine quantity of lines in this block for right side
 					if (op == OP_TRIVIAL && m_options.m_bCompletelyBlankOutIgnoredDiffereneces)
 					{
+						const bool adjustLeftForMissingNewline =
+							!thisob->link &&
+							thisob->deleted > 0 &&
+							thisob->line0 + thisob->deleted == file_data_ary[0].valid_lines &&
+							file_data_ary[0].missing_newline;
+						const bool adjustRightForMissingNewline =
+							!thisob->link &&
+							thisob->inserted > 0 &&
+							thisob->line1 + thisob->inserted == file_data_ary[1].valid_lines &&
+							file_data_ary[1].missing_newline;
+						const int qtyLinesLeft = (trans_b0 - trans_a0) + 1
+							- (adjustLeftForMissingNewline ? 1 : 0); // Determine quantity of lines in this block for left side
+						const int qtyLinesRight = (trans_b1 - trans_a1) + 1
+							- (adjustRightForMissingNewline ? 1 : 0); // Determine quantity of lines in this block for right side
 						if (qtyLinesLeft == qtyLinesRight)
 						{
 							op = OP_NONE;

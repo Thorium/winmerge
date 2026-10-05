@@ -6,41 +6,45 @@ This file lists versions of the external components we are using.
 - POCO: 1.15.1
 - boost: 1.88.0
 - frhed: 0.10904.2017.22
-- WinIMerge: 1.0.52.0
-  - freeimage: 3.19.10 (https://github.com/danoli3/FreeImage)
+- WinIMerge: 1.0.54.0
+  - freeimage: 3.19.12+ (https://github.com/danoli3/FreeImage)
   - LibXDiff: 611e42a on Nov 2, 2018 (https://github.com/git/git/tree/master/xdiff)
-- WinWebDiff: 1.0.20.0
+- WinWebDiff: 1.0.21.0
   - WebView2: 1.0.1518.46
   - wil: 1.0.191107.2
   - rapidjson: 1.1.1
 - Google C++ Testing Framework: 1.14.0
 - GNU patch: 2.7.6-1
-- 7-zip: 26.01
+- 7-zip: 26.03
 - LibXDiff: 611e42a on Nov 2, 2018 (https://github.com/git/git/tree/master/xdiff)
 - html-tidy5: 5.4.0
 - jq: 1.8.1
 - wil: 209ff9c7e30e71bf6d1405557bf78544920f8157 on Sep 9, 2021
 - md4c: 0.5.2
 - cliphcat: 0.3.0
-- darkmodelib: 0.21.2.0
+- darkmodelib: 0.75.1
 - StackWalker: 7af4024 on Aug 4, 2025 (https://github.com/JochenKalmbach/StackWalker)
 - tree-sitter: 0.25.10 (https://github.com/tree-sitter/tree-sitter)
-  - tree-sitter-fsharp:      0.3.0  (https://github.com/ionide/tree-sitter-fsharp)
+- tree-sitter-grammars: 0.2.1
+  - tree-sitter-fsharp:      0.3.12 (https://github.com/ionide/tree-sitter-fsharp)
+  - tree-sitter-ini:        v1.4.0  (https://github.com/justinmk/tree-sitter-ini)
   - tree-sitter-markdown:   v0.5.3  (https://github.com/tree-sitter-grammars/tree-sitter-markdown)
+  - tree-sitter-properties: v0.3.0  (https://github.com/tree-sitter-grammars/tree-sitter-properties)
+  - tree-sitter-toml:       v0.7.0  (https://github.com/tree-sitter-grammars/tree-sitter-toml)
   - tree-sitter-xml:        v0.7.0  (https://github.com/tree-sitter-grammars/tree-sitter-xml)
   - tree-sitter-yaml:       v0.7.2  (https://github.com/tree-sitter-grammars/tree-sitter-yaml)
-  - tree-sitter-c:          v0.24.1 (https://github.com/tree-sitter/tree-sitter-c)
+  - tree-sitter-c:          v0.24.2 (https://github.com/tree-sitter/tree-sitter-c)
   - tree-sitter-cpp:        v0.23.4 (https://github.com/tree-sitter/tree-sitter-cpp)
-  - tree-sitter-c-sharp:    v0.23.1 (https://github.com/tree-sitter/tree-sitter-c-sharp)
+  - tree-sitter-c-sharp:    v0.23.5 (https://github.com/tree-sitter/tree-sitter-c-sharp)
   - tree-sitter-python:     v0.25.0 (https://github.com/tree-sitter/tree-sitter-python)
   - tree-sitter-javascript: v0.25.0 (https://github.com/tree-sitter/tree-sitter-javascript)
   - tree-sitter-typescript: v0.23.2 (https://github.com/tree-sitter/tree-sitter-typescript)
   - tree-sitter-java:       v0.23.5 (https://github.com/tree-sitter/tree-sitter-java)
   - tree-sitter-go:         v0.25.0 (https://github.com/tree-sitter/tree-sitter-go)
-  - tree-sitter-rust:       v0.24.1 (https://github.com/tree-sitter/tree-sitter-rust)
+  - tree-sitter-rust:       v0.24.2 (https://github.com/tree-sitter/tree-sitter-rust)
   - tree-sitter-json:       v0.24.8 (https://github.com/tree-sitter/tree-sitter-json)
   - tree-sitter-html:       v0.23.2 (https://github.com/tree-sitter/tree-sitter-html)
   - tree-sitter-css:        v0.25.0 (https://github.com/tree-sitter/tree-sitter-css)
   - tree-sitter-bash:       v0.25.1 (https://github.com/tree-sitter/tree-sitter-bash)
   - tree-sitter-ruby:       v0.23.1 (https://github.com/tree-sitter/tree-sitter-ruby)
-  - tree-sitter-php:        v0.24.2 (https://github.com/tree-sitter/tree-sitter-php)
+  - tree-sitter-php:        v0.25.0 (https://github.com/tree-sitter/tree-sitter-php)

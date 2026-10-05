@@ -73,6 +73,33 @@ int MakeCapturePriority(const std::string& captureName, uint32_t startByte, uint
 	const int spanScore = 100000 - static_cast<int>(std::min<uint32_t>(span, 100000));
 	return specificityScore + spanScore;
 }
+
+int GetColorPriority(int colorIndex)
+{
+	switch (colorIndex)
+	{
+	case COLORINDEX_FUNCNAME:     return 100;
+	case COLORINDEX_USER1:        return 90;
+	case COLORINDEX_KEYWORD:      return 80;
+	case COLORINDEX_USER2:        return 70;
+	case COLORINDEX_STRING:       return 60;
+	case COLORINDEX_NUMBER:       return 50;
+	case COLORINDEX_OPERATOR:     return 40;
+	case COLORINDEX_COMMENT:      return 30;
+	default:                      return 0;
+	}
+}
+
+struct TSQueryCursorDeleter {
+	void operator()(TSQueryCursor* p) const { ts_query_cursor_delete(p); }
+};
+using UniqueTSQueryCursor = std::unique_ptr<TSQueryCursor, TSQueryCursorDeleter>;
+
+static constexpr uint64_t MakeByteRangeKey(uint32_t startByte, uint32_t endByte)
+{
+	return (static_cast<uint64_t>(startByte) << 32) | endByte;
+}
+
 }
 
 // ============================================================================
@@ -112,7 +139,7 @@ CTreeSitterColorMap::CTreeSitterColorMap()
 	m_map["function.macro"]         = COLORINDEX_FUNCNAME;
 	m_map["method"]                 = COLORINDEX_FUNCNAME;
 	m_map["method.call"]            = COLORINDEX_FUNCNAME;
-	m_map["constructor"]            = COLORINDEX_FUNCNAME;
+	m_map["constructor"]            = COLORINDEX_NORMALTEXT;
 
 	// Comments
 	m_map["comment"]                = COLORINDEX_COMMENT;
@@ -153,16 +180,16 @@ CTreeSitterColorMap::CTreeSitterColorMap()
 	m_map["type.qualifier"]         = COLORINDEX_USER1;
 	m_map["storageclass"]           = COLORINDEX_USER1;
 
-	// Variables / properties / modules -> USER2 or NORMALTEXT
+	// Variables / properties / modules -> USER1, USER2 or NORMALTEXT
 	m_map["variable"]               = COLORINDEX_NORMALTEXT;
-	m_map["variable.builtin"]       = COLORINDEX_USER2;
+	m_map["variable.builtin"]       = COLORINDEX_USER1;
 	m_map["variable.parameter"]     = COLORINDEX_NORMALTEXT;
-	m_map["variable.member"]        = COLORINDEX_USER2;
-	m_map["property"]               = COLORINDEX_USER2;
-	m_map["field"]                  = COLORINDEX_USER2;
-	m_map["constant"]               = COLORINDEX_USER2;
-	m_map["constant.builtin"]       = COLORINDEX_USER2;
-	m_map["constant.macro"]         = COLORINDEX_USER2;
+	m_map["variable.member"]        = COLORINDEX_USER1;
+	m_map["property"]               = COLORINDEX_USER1;
+	m_map["field"]                  = COLORINDEX_NORMALTEXT;
+	m_map["constant"]               = COLORINDEX_NORMALTEXT;
+	m_map["constant.builtin"]       = COLORINDEX_USER1;
+	m_map["constant.macro"]         = COLORINDEX_USER1;
 	m_map["module"]                 = COLORINDEX_USER1;
 	m_map["namespace"]              = COLORINDEX_USER1;
 	m_map["label"]                  = COLORINDEX_USER2;
@@ -482,6 +509,8 @@ void CTreeSitterParser::ParseDocument()
 	TSTree* pOldTree = m_pTree;
 	if (m_nLineCount < kMaxLinesForHighlight)
 		m_pTree = ts_parser_parse(m_pParser, pOldTree, input);
+	else
+		m_pTree = nullptr;
 
 	if (pOldTree)
 		ts_tree_delete(pOldTree);
@@ -515,7 +544,7 @@ void CTreeSitterParser::NotifyEdit(bool bInsert, const CEPoint & ptStartPos, con
 		tsEdit.old_end_byte = startByte;
 		tsEdit.old_end_point = tsEdit.start_point;
 
-		tsEdit.new_end_byte = CharPosToByteOffset(ptEndPos.y, ptEndPos.x, true);
+		tsEdit.new_end_byte = CharPosToByteOffset(ptEndPos.y, ptEndPos.x, false);
 		CharPosToTSPoint(ptEndPos.y, ptEndPos.x, tsEdit.new_end_point);
 	}
 	else
@@ -649,6 +678,39 @@ uint32_t CTreeSitterParser::GetTotalBytes() const
 	return 0;
 }
 
+std::vector<const CTreeSitterParser::LocalScope*>
+CTreeSitterParser::FindEnclosingScopes(const std::vector<LocalScope>& localScopes, uint32_t startByte, uint32_t endByte)
+{
+	std::vector<const LocalScope*> result;
+	for (const auto& scope : localScopes)
+	{
+		if (startByte >= scope.startByte && endByte <= scope.endByte)
+			result.push_back(&scope);
+	}
+	std::sort(result.begin(), result.end(),
+		[](const LocalScope* a, const LocalScope* b)
+		{
+			return (a->endByte - a->startByte) < (b->endByte - b->startByte);
+		});
+	return result;
+}
+
+const CTreeSitterParser::LocalDef*
+CTreeSitterParser::FindDefinitionInScopes(const std::wstring& name, uint32_t refStartByte, const std::vector<const LocalScope*>& enclosingScopes)
+{
+	for (const auto* pScope : enclosingScopes)
+	{
+		for (const auto& def : pScope->defs)
+		{
+			if (def.name == name && def.startByte <= refStartByte)
+				return &def;
+		}
+		if (!pScope->inherits)
+			break;
+	}
+	return nullptr;
+}
+
 /**
  * @brief Extract a #set! predicate property value from a query pattern.
  *
@@ -721,11 +783,11 @@ void CTreeSitterParser::RunTagsQuery()
 	const TSQuery* pQuery = m_pLang->GetTagsQuery();
 	TSNode rootNode = ts_tree_root_node(m_pTree);
 
-	TSQueryCursor* pCursor = ts_query_cursor_new();
+	UniqueTSQueryCursor pCursor(ts_query_cursor_new());
 	if (!pCursor)
 		return;
 
-	ts_query_cursor_exec(pCursor, pQuery, rootNode);
+	ts_query_cursor_exec(pCursor.get(), pQuery, rootNode);
 
 	uint32_t totalBytes = GetTotalBytes();
 
@@ -759,7 +821,7 @@ void CTreeSitterParser::RunTagsQuery()
 	};
 
 	TSQueryMatch match;
-	while (ts_query_cursor_next_match(pCursor, &match))
+	while (ts_query_cursor_next_match(pCursor.get(), &match))
 	{
 		std::wstring name;
 		uint32_t nameStart = 0;
@@ -841,8 +903,6 @@ void CTreeSitterParser::RunTagsQuery()
 			});
 		}
 	}
-
-	ts_query_cursor_delete(pCursor);
 
 	m_bTagsQueried = true;
 }
@@ -995,18 +1055,18 @@ void CTreeSitterParser::RunLocalsQuery()
 	const TSQuery* pQuery = m_pLang->GetLocalsQuery();
 	TSNode rootNode = ts_tree_root_node(m_pTree);
 
-	TSQueryCursor* pCursor = ts_query_cursor_new();
+	UniqueTSQueryCursor pCursor(ts_query_cursor_new());
 	if (!pCursor)
 		return;
 
-	ts_query_cursor_exec(pCursor, pQuery, rootNode);
+	ts_query_cursor_exec(pCursor.get(), pQuery, rootNode);
 
 	// Temporary storage for references (resolved after all defs are collected)
 	std::vector<PendingRef> references;
 	uint32_t totalBytes = GetTotalBytes();
 
 	TSQueryMatch match;
-	while (ts_query_cursor_next_match(pCursor, &match))
+	while (ts_query_cursor_next_match(pCursor.get(), &match))
 	{
 		for (uint16_t i = 0; i < match.capture_count; i++)
 		{
@@ -1081,8 +1141,6 @@ void CTreeSitterParser::RunLocalsQuery()
 		}
 	}
 
-	ts_query_cursor_delete(pCursor);
-
 	// Sort scopes by start byte, then by size (smallest/innermost first for lookup)
 	std::sort(m_localScopes.begin(), m_localScopes.end(),
 		[](const LocalScope& a, const LocalScope& b)
@@ -1095,23 +1153,23 @@ void CTreeSitterParser::RunLocalsQuery()
 	m_pendingRefs = std::move(references);
 }
 
-std::vector<HighlightCapture>
+std::vector<CTreeSitterParser::HighlightCapture>
 CTreeSitterParser::CollectCaptures(TSNode& rootNode, const TSQuery* pQuery, int nStartLine, int nEndLine)
 {
 	std::vector<HighlightCapture> captures;
 
-	TSQueryCursor* pCursor = ts_query_cursor_new();
+	UniqueTSQueryCursor pCursor(ts_query_cursor_new());
 	if (!pCursor)
 		return captures;
 
-	ts_query_cursor_set_point_range(pCursor,
+	ts_query_cursor_set_point_range(pCursor.get(),
 		{ static_cast<uint32_t>(nStartLine), 0 },
 		{ static_cast<uint32_t>(nEndLine + 1), 0 });
 
-	ts_query_cursor_exec(pCursor, pQuery, rootNode);
+	ts_query_cursor_exec(pCursor.get(), pQuery, rootNode);
 
 	TSQueryMatch match;
-	while (ts_query_cursor_next_match(pCursor, &match))
+	while (ts_query_cursor_next_match(pCursor.get(), &match))
 	{
 		for (uint16_t i = 0; i < match.capture_count; i++)
 		{
@@ -1145,12 +1203,10 @@ CTreeSitterParser::CollectCaptures(TSNode& rootNode, const TSQuery* pQuery, int 
 		}
 	}
 
-	ts_query_cursor_delete(pCursor);
-
 	return captures;
 }
 
-std::vector<HighlightEntry>
+std::vector<CTreeSitterParser::HighlightEntry>
 CTreeSitterParser::BuildHighlightEntries(const std::vector<HighlightCapture>& captures)
 {
 	std::vector<HighlightEntry> entries;
@@ -1191,7 +1247,7 @@ void CTreeSitterParser::ResolveLocalReferences(std::vector<HighlightEntry>& high
 
 	for (const auto& e : highlights)
 	{
-		uint64_t key = (static_cast<uint64_t>(e.startByte) << 32) | e.endByte;
+		uint64_t key = MakeByteRangeKey(e.startByte, e.endByte);
 		nodeHighlightMap[key] = e.colorIndex;
 	}
 
@@ -1200,8 +1256,7 @@ void CTreeSitterParser::ResolveLocalReferences(std::vector<HighlightEntry>& high
 	{
 		for (auto& def : scope.defs)
 		{
-			uint64_t defKey = (static_cast<uint64_t>(def.startByte) << 32) |
-							  static_cast<uint64_t>(def.endByte);
+			uint64_t defKey = MakeByteRangeKey(def.startByte, def.endByte);
 			auto it = nodeHighlightMap.find(defKey);
 			if (it != nodeHighlightMap.end())
 				def.highlight = it->second;
@@ -1211,81 +1266,45 @@ void CTreeSitterParser::ResolveLocalReferences(std::vector<HighlightEntry>& high
 	// Pass 2: Resolve references - find matching definition in enclosing scopes
 	for (const auto& ref : m_pendingRefs)
 	{
-		int resolvedHighlight = -1;
-
 		// Search scopes from innermost to outermost
 		// Find all scopes that contain this reference
-		std::vector<const LocalScope*> enclosingScopes;
-		for (const auto& scope : m_localScopes)
-		{
-			if (ref.startByte >= scope.startByte && ref.endByte <= scope.endByte)
-				enclosingScopes.push_back(&scope);
-		}
-
-		// Sort by size (smallest = innermost first)
-		std::sort(enclosingScopes.begin(), enclosingScopes.end(),
-			[](const LocalScope* a, const LocalScope* b)
-			{
-				return (a->endByte - a->startByte) < (b->endByte - b->startByte);
-			});
+		auto enclosingScopes = FindEnclosingScopes(m_localScopes, ref.startByte, ref.endByte);
 
 		// Search for a matching definition
-		for (const auto* pScope : enclosingScopes)
-		{
-			for (const auto& def : pScope->defs)
-			{
-				// Match by name and ensure the definition appears before the reference
-				if (def.name == ref.name && def.startByte <= ref.startByte && def.highlight >= 0)
-				{
-					resolvedHighlight = def.highlight;
-					break;
-				}
-			}
-			if (resolvedHighlight >= 0)
-				break;
-			// If this scope doesn't inherit, stop searching
-			if (!pScope->inherits)
-				break;
-		}
-
-		if (resolvedHighlight >= 0)
-		{
-			uint64_t refKey = (static_cast<uint64_t>(ref.startByte) << 32) |
-				              static_cast<uint64_t>(ref.endByte);
-			m_localRefHighlights[refKey] = resolvedHighlight;
-		}
+		const LocalDef* pDef = FindDefinitionInScopes(ref.name, ref.startByte, enclosingScopes);
+		if (pDef && pDef->highlight >= 0)
+			m_localRefHighlights[MakeByteRangeKey(ref.startByte, ref.endByte)] = pDef->highlight;
 	}
 
 	// Pass 3: Apply resolved reference highlights to the highlight entries
 	for (auto& h : highlights)
 	{
-		uint64_t key = (static_cast<uint64_t>(h.startByte) << 32) |
-				       static_cast<uint64_t>(h.endByte);
+		uint64_t key = MakeByteRangeKey(h.startByte, h.endByte);
 		auto it = m_localRefHighlights.find(key);
 		if (it != m_localRefHighlights.end())
 			h.colorIndex = it->second;
 	}
 }
 
-std::vector<InjectionRegion>
+std::vector<CTreeSitterParser::InjectionRegion>
 CTreeSitterParser::CollectInjectionRegions(TSNode& rootNode, const TSQuery* pQuery, int nStartLine, int nEndLine)
 {
 	std::vector<InjectionRegion> injections;
 
-	TSQueryCursor* pCursor = ts_query_cursor_new();
+	UniqueTSQueryCursor pCursor(ts_query_cursor_new());
 	if (!pCursor)
 		return injections;
 
-	ts_query_cursor_set_point_range(pCursor,
+	ts_query_cursor_set_point_range(pCursor.get(),
 		{ static_cast<uint32_t>(nStartLine), 0 },
 		{ static_cast<uint32_t>(nEndLine + 1), 0 });
 
-	ts_query_cursor_exec(pCursor, pQuery, rootNode);
+	ts_query_cursor_exec(pCursor.get(), pQuery, rootNode);
 
 	uint32_t totalBytes = GetTotalBytes();
 
 	TSQueryMatch match;
-	while (ts_query_cursor_next_match(pCursor, &match))
+	while (ts_query_cursor_next_match(pCursor.get(), &match))
 	{
 		std::string language;
 		TSNode contentNode = {};
@@ -1301,9 +1320,7 @@ CTreeSitterParser::CollectInjectionRegions(TSNode& rootNode, const TSQuery* pQue
 			if (!selfVal.empty())
 			{
 				// Use the current language
-				const std::wstring& wname = m_pLang->GetName();
-				for (wchar_t ch : wname)
-					language += static_cast<char>(ch);  // ASCII only
+				language = ucr::toUTF8(m_pLang->GetName());
 			}
 		}
 
@@ -1327,11 +1344,7 @@ CTreeSitterParser::CollectInjectionRegions(TSNode& rootNode, const TSQuery* pQue
 				uint32_t start = ts_node_start_byte(capture.node);
 				uint32_t end = ts_node_end_byte(capture.node);
 				if (start < totalBytes && end <= totalBytes)
-				{
-					std::wstring wLang = GetUtf16Text(start, end);
-					for (wchar_t ch : wLang)
-						language += static_cast<char>(ch);
-				}
+					language = ucr::toUTF8(GetUtf16Text(start, end));
 			}
 		}
 
@@ -1351,8 +1364,6 @@ CTreeSitterParser::CollectInjectionRegions(TSNode& rootNode, const TSQuery* pQue
 		}
 	}
 
-	ts_query_cursor_delete(pCursor);
-
 	return injections;
 }
 
@@ -1371,18 +1382,22 @@ void CTreeSitterParser::TranslateCoordinates(std::vector<HighlightEntry>& entrie
 	}
 }
 
-void CTreeSitterParser::EmitLineBlocks(const std::vector<HighlightEntry>& entries)
+void CTreeSitterParser::EmitLineBlocks(const std::vector<HighlightEntry>& entries, int layerPriority)
 {
 	for (const auto& h : entries)
 	{
 		for (uint32_t row = h.startRow; row <= h.endRow && row < static_cast<uint32_t>(m_nLineCount); ++row)
 		{
+			if (row == h.endRow && h.endCol == 0)
+				break;
+
 			uint32_t byteCol = (row == h.startRow) ? h.startCol : 0;
 
 			TreeSitterLineBlock block;
 			block.nCharPos = byteCol / sizeof(wchar_t);
 			block.nColorIndex = h.colorIndex;
 			block.nPriority = h.priority;
+			block.nLayerPriority = layerPriority;
 			block.nOrder = h.order;
 
 			m_lineBlocks[row].push_back(block);
@@ -1394,6 +1409,7 @@ void CTreeSitterParser::EmitLineBlocks(const std::vector<HighlightEntry>& entrie
 
 			endBlock.nCharPos = h.endCol / sizeof(wchar_t);
 			endBlock.nColorIndex = COLORINDEX_NORMALTEXT;
+			endBlock.nLayerPriority = layerPriority;
 			endBlock.nPriority = INT_MIN;
 			endBlock.nOrder = h.order;
 
@@ -1422,7 +1438,7 @@ void CTreeSitterParser::RunHighlightQuery(int nStartLine, int nEndLine)
 	auto captures = CollectCaptures(rootNode, pQuery, nStartLine, nEndLine);
 	auto entries = BuildHighlightEntries(captures);
 	ResolveLocalReferences(entries);
-	EmitLineBlocks(entries);
+	EmitLineBlocks(entries, 0);
 }
 
 /**
@@ -1457,9 +1473,7 @@ void CTreeSitterParser::RunInjectionQuery(int nStartLine, int nEndLine)
 	for (const auto& inj : injections)
 	{
 		// Convert language name to wstring for registry lookup
-		std::wstring wLangName;
-		for (char ch : inj.language)
-			wLangName += static_cast<wchar_t>(ch);
+		std::wstring wLangName = ucr::toTString(inj.language);
 
 		// Try to find the language - look it up by name directly in the registry's
 		// available languages (we need a way to get language by name, not just by ext).
@@ -1511,7 +1525,7 @@ void CTreeSitterParser::RunInjectionQuery(int nStartLine, int nEndLine)
 			auto captures = CollectCaptures(injRoot, pInjQuery, 0, INT_MAX);
 			auto entries = BuildHighlightEntries(captures);
 			TranslateCoordinates(entries, inj.startRow, inj.startCol);
-			EmitLineBlocks(entries);
+			EmitLineBlocks(entries, 1);
 
 			ts_tree_delete(pInjTree);
 		}
@@ -1532,9 +1546,21 @@ void CTreeSitterParser::BuildLineCache(int nStartLine, int nEndLine)
 			{
 				if (a.nCharPos != b.nCharPos)
 					return a.nCharPos < b.nCharPos;
+				if (a.nLayerPriority != b.nLayerPriority)
+					return a.nLayerPriority < b.nLayerPriority;
+
+				const int aColorPrio = GetColorPriority(a.nColorIndex);
+				const int bColorPrio = GetColorPriority(b.nColorIndex);
+				if (aColorPrio != bColorPrio)
+					return aColorPrio < bColorPrio;
+
 				if (a.nPriority != b.nPriority)
 					return a.nPriority < b.nPriority;
-				return a.nOrder < b.nOrder;
+
+				// Descending order: higher order (later pattern in highlights.scm)
+				// sorts first, so the lower order (earlier/more specific pattern)
+				// ends up last and is kept by the dedup step below.
+				return a.nOrder > b.nOrder;
 			});
 
 		// Remove consecutive entries at the same position (keep the last one,
@@ -1573,16 +1599,19 @@ static struct
 	{ LangServices::LanguageId::SRC_FSHARP_SIGNATURE, L"fsharp_signature" },
 	{ LangServices::LanguageId::SRC_GO, L"go" },
 	{ LangServices::LanguageId::SRC_HTML, L"html" },
+	{ LangServices::LanguageId::SRC_INI, L"ini" },
 	{ LangServices::LanguageId::SRC_JAVA, L"java" },
 	{ LangServices::LanguageId::SRC_JAVASCRIPT, L"javascript" },
 	{ LangServices::LanguageId::SRC_JSON, L"json" },
 	{ LangServices::LanguageId::SRC_MARKDOWN, L"markdown" },
 	{ LangServices::LanguageId::SRC_PHP, L"php" },
 	{ LangServices::LanguageId::SRC_POWERSHELL, L"powershell" },
+	{ LangServices::LanguageId::SRC_PROPERTIES, L"properties" },
 	{ LangServices::LanguageId::SRC_PYTHON, L"python" },
 	{ LangServices::LanguageId::SRC_RUBY, L"ruby" },
 	{ LangServices::LanguageId::SRC_RUST, L"rust" },
 	{ LangServices::LanguageId::SRC_SH, L"bash" },
+	{ LangServices::LanguageId::SRC_TOML, L"toml" },
 	{ LangServices::LanguageId::SRC_TSX, L"tsx" },
 	{ LangServices::LanguageId::SRC_TYPESCRIPT, L"typescript" },
 	{ LangServices::LanguageId::SRC_XML, L"xml" },
@@ -1846,32 +1875,14 @@ bool CTreeSitterParser::TryGetDefinitionByteRangeAt(uint32_t byteOffset, uint32_
 		if (byteOffset < ref.startByte || byteOffset >= ref.endByte)
 			continue;
 
-		std::vector<const LocalScope*> enclosingScopes;
-		for (const auto& scope : m_localScopes)
-		{
-			if (ref.startByte >= scope.startByte && ref.endByte <= scope.endByte)
-				enclosingScopes.push_back(&scope);
-		}
+		auto enclosingScopes = FindEnclosingScopes(m_localScopes, ref.startByte, ref.endByte);
 
-		std::sort(enclosingScopes.begin(), enclosingScopes.end(),
-			[](const LocalScope* a, const LocalScope* b)
-			{
-				return (a->endByte - a->startByte) < (b->endByte - b->startByte);
-			});
-
-		for (const auto* pScope : enclosingScopes)
+		const LocalDef* pDef = FindDefinitionInScopes(ref.name, ref.startByte, enclosingScopes);
+		if (pDef)
 		{
-			for (const auto& def : pScope->defs)
-			{
-				if (def.name == ref.name && def.startByte <= ref.startByte)
-				{
-					defStartByte = def.startByte;
-					defEndByte = def.endByte;
-					return true;
-				}
-			}
-			if (!pScope->inherits)
-				break;
+			defStartByte = pDef->startByte;
+			defEndByte = pDef->endByte;
+			return true;
 		}
 
 		return false;

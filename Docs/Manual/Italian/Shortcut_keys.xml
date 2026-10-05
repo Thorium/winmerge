@@ -5,7 +5,7 @@
     </indexterm></title>
 
   <para>WinMerge include la maggior parte dei tasti di scelta rapida familiari
-comunemente utilizzati in altre applicazioni Windows.</para>
+comunemente usati in altre applicazioni Windows.</para>
 
   <table>
     <title>Generale</title>
@@ -216,6 +216,12 @@ schermo)</entry>
         </row>
 
         <row>
+          <entry><keycap>F12</keycap></entry>
+
+          <entry>Vai alla definizione</entry>
+        </row>
+
+        <row>
           <entry><keycombo> <keycap>Ctrl</keycap> <keycap>B</keycap> </keycombo></entry>
 
           <entry>Inizia la selezione della colonna</entry>
@@ -255,6 +261,30 @@ schermo)</entry>
         </row>
 
         <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>1</keycap>
+</keycombo></entry>
+
+          <entry>Toggle left pane content for current or selected differences (Merge Result
+pane)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>2</keycap>
+</keycombo></entry>
+
+          <entry>Toggle pane 2 content (right in two-way, middle in three-way)  for current
+or selected differences (Merge Result pane)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>3</keycap>
+</keycombo></entry>
+
+          <entry>Toggle right pane content for current or selected differences (Merge Result
+pane)</entry>
+        </row>
+
+        <row>
           <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Alt</keycap> <keycap>G</keycap>
 </keycombo></entry>
 
@@ -284,14 +314,14 @@ schermo)</entry>
         <row>
           <entry><keycombo> <keycap>Ctrl</keycap> <keycap>U</keycap> </keycombo></entry>
 
-          <entry>Converti il ​​testo selezionato in minuscolo</entry>
+          <entry>Converti il testo selezionato in minuscolo</entry>
         </row>
 
         <row>
           <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Maiusc</keycap> <keycap>U</keycap>
 </keycombo></entry>
 
-          <entry>Converti il ​​testo selezionato in maiuscolo</entry>
+          <entry>Converti il testo selezionato in maiuscolo</entry>
         </row>
 
         <row>

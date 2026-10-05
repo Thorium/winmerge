@@ -212,6 +212,12 @@
         </row>
 
         <row>
+          <entry><keycap>F12</keycap></entry>
+
+          <entry>Go to definition</entry>
+        </row>
+
+        <row>
           <entry><keycombo> <keycap>Ctrl</keycap> <keycap>B</keycap> </keycombo></entry>
 
           <entry>Begin column selection</entry>
@@ -248,6 +254,30 @@
 </keycombo></entry>
 
           <entry>Go to moved line between left side and middle (3 panes)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>1</keycap>
+</keycombo></entry>
+
+          <entry>Toggle left pane content for current or selected differences (Merge Result
+pane)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>2</keycap>
+</keycombo></entry>
+
+          <entry>Toggle pane 2 content (right in two-way, middle in three-way)  for current
+or selected differences (Merge Result pane)</entry>
+        </row>
+
+        <row>
+          <entry><keycombo> <keycap>Ctrl</keycap> <keycap>Shift</keycap> <keycap>3</keycap>
+</keycombo></entry>
+
+          <entry>Toggle right pane content for current or selected differences (Merge Result
+pane)</entry>
         </row>
 
         <row>

@@ -24,7 +24,7 @@ static const unsigned MAX_TABSIZE = 64u;
 PropEditor::PropEditor(COptionsMgr *optionsMgr) 
 : OptionsPanel(optionsMgr, PropEditor::IDD)
 , m_bHiliteSyntax(false)
-, m_nTreeSitterMode(0)
+, m_nHiliteSyntaxMode(0)
 , m_bTreeSitterOccurrenceHighlight(false)
 , m_bTreeSitterBreadcrumb(false)
 , m_bSemanticMergeExperimental(false)
@@ -37,7 +37,7 @@ PropEditor::PropEditor(COptionsMgr *optionsMgr)
 		+[](unsigned v) { return v; }, +[](unsigned v) { return std::clamp(v, 1u, MAX_TABSIZE); });
 	BindOption(OPT_TAB_TYPE, m_nTabType, IDC_PROP_INSERT_TABS, DDX_Radio);
 	BindOption(OPT_SYNTAX_HIGHLIGHT, m_bHiliteSyntax, IDC_HILITE_CHECK, DDX_Check);
-	BindOption(OPT_TREE_SITTER_MODE, m_nTreeSitterMode, IDC_TREE_SITTER_MODE, DDX_CBIndex);
+	BindOption(OPT_SYNTAX_HIGHLIGHT_MODE, m_nHiliteSyntaxMode, IDC_HILITE_SYNTAX_MODE, DDX_CBIndex);
 	BindOption(OPT_TREE_SITTER_OCCURRENCE_HIGHLIGHT, m_bTreeSitterOccurrenceHighlight, IDC_TREE_SITTER_OCCURRENCE_CHECK, DDX_Check);
 	BindOption(OPT_TREE_SITTER_BREADCRUMB, m_bTreeSitterBreadcrumb, IDC_TREE_SITTER_BREADCRUMB_CHECK, DDX_Check);
 	BindOption(OPT_SEMANTIC_MERGE_EXPERIMENTAL, m_bSemanticMergeExperimental, IDC_SEMANTIC_MERGE_CHECK, DDX_Check);
@@ -90,8 +90,8 @@ BOOL PropEditor::OnInitDialog()
  */
 void PropEditor::LoadComboBoxStrings()
 {
-	SetDlgItemComboBoxList(IDC_TREE_SITTER_MODE,
-		{ _("Disabled"), _("Prefer Tree-sitter"), _("Prefer Built-in") });
+	SetDlgItemComboBoxList(IDC_HILITE_SYNTAX_MODE,
+		{ _("Built-in only"), _("Built-in first"), _("Tree-sitter first"), _("Tree-sitter only")});
 	SetDlgItemComboBoxList(IDC_RENDERING_MODE,
 		{ _("GDI"), _("DirectWrite Default"), _("DirectWrite Aliased"), _("DirectWrite GDI Classic"), _("DirectWrite GDI Natural"), _("DirectWrite Natural"), _("DirectWrite Natural Symmetric") });
 }

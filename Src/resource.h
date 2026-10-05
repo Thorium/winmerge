@@ -46,6 +46,10 @@
 #define IDR_POPUP_ADDCMPMENU            150
 #define IDR_POPUP_RENAMEMOVE_MENU       151
 #define IDR_POPUP_BROWSE                152
+#define IDR_POPUP_MERGERESULTVIEW_2WAY  153
+#define IDR_POPUP_MERGERESULTVIEW_3WAY  154
+#define IDR_POPUP_MERGERESULT_2WAY      155
+#define IDR_POPUP_MERGERESULT_3WAY      156
 #define IDD_ABOUTBOX                    200
 #define IDD_OPEN                        202
 #define IDD_SAVECLOSING                 203
@@ -58,6 +62,8 @@
 #define IDD_MESSAGE_BOX                 219
 #define IDD_PREFERENCES                 224
 #define IDD_DIRCMP_REPORT               226
+#define IDD_FILECMP_REPORT              227
+#define IDD_ARCHIVE                     292
 #define IDD_COMPARE_STATISTICS          229
 #define IDD_COMPARE_STATISTICS3         230
 #define IDD_LOAD_SAVE_CODEPAGE          231
@@ -107,10 +113,11 @@
 #define IDD_DARK_FONT_DIALOG            289
 #define IDD_COMPARISON_RESULT_FILTER    290
 #define IDD_FILTERS_MATCHINSIDE         291
-#define IDD_SEMANTIC_PREVIEW_DLG        292
+#define IDD_SEMANTIC_PREVIEW_DLG        294
 #define IDI_ROTATE2                     302
 #define IDR_LOGO                        307
 #define IDR_MARGIN_ICONS_PNG            310
+#define IDR_TOOLBAR_ENABLED32_PNG       312
 #define IDB_EDIT_COPY                   316
 #define IDB_EDIT_CUT                    317
 #define IDB_EDIT_PASTE                  318
@@ -132,12 +139,13 @@
 #define IDB_FILE_PRINT                  337
 #define IDB_TOOLS_GENERATEPATCH         338
 #define IDB_TOOLS_GENERATEREPORT        339
-#define IDR_MARGIN_ICONS                340
-#define IDR_MARGIN_CURSOR               341
-#define IDB_EDIT_TOGGLE_BOOKMARK        342
-#define IDB_EDIT_GOTO_NEXT_BOOKMARK     343
-#define IDB_EDIT_GOTO_PREV_BOOKMARK     344
-#define IDB_EDIT_CLEAR_ALL_BOOKMARKS    345
+#define IDB_TOOLS_GENERATEARCHIVE       340
+#define IDR_MARGIN_ICONS                341
+#define IDR_MARGIN_CURSOR               342
+#define IDB_EDIT_TOGGLE_BOOKMARK        343
+#define IDB_EDIT_GOTO_NEXT_BOOKMARK     344
+#define IDB_EDIT_GOTO_PREV_BOOKMARK     345
+#define IDB_EDIT_CLEAR_ALL_BOOKMARKS    346
 #define IDB_LEFT                        347
 #define IDB_MIDDLE                      348
 #define IDB_RIGHT                       349
@@ -161,7 +169,6 @@
 #define IDB_MOVE_LEFT_TO_BROWSE         367
 #define IDB_MOVE_MIDDLE_TO_BROWSE       368
 #define IDB_MOVE_RIGHT_TO_BROWSE        369
-#define IDB_TOOLBAR_ENABLED32           370
 #define IDB_VIEW_ZOOMIN                 371
 #define IDB_VIEW_ZOOMOUT                372
 #define IDB_FILE_NEW3                   373
@@ -174,7 +181,6 @@
 #define IDB_MERGE_COMPARE_LEFT2_RIGHT1  380
 #define IDB_COPY_FROM_LEFT              381
 #define IDB_COPY_FROM_RIGHT             382
-#define IDB_TOOLBAR_ENABLED             383
 #define IDB_FILE_NEW_TABLE              384
 #define IDB_FILE_NEW_HEX                385
 #define IDB_FILE_NEW_IMAGE              386
@@ -192,6 +198,28 @@
 #define IDB_COPY_SELECTED_LINES_RIGHT_TO_MIDDLE 398
 #define IDB_COPY_SELECTED_LINES_RIGHT_TO_LEFT 399
 #define IDB_FILE_NEW_FOLDER             400
+#define IDB_FILE_NEW                    401
+#define IDB_FILE_OPEN                   402
+#define IDB_FILE_SAVE                   403
+#define IDB_EDIT_UNDO                   404
+#define IDB_EDIT_REDO                   405
+#define IDB_SELECTLINEDIFF              406
+#define IDB_CURDIFF                     407
+#define IDB_FIRSTDIFF                   408
+#define IDB_LASTTDIFF                   409
+#define IDB_NEXTDIFF                    410
+#define IDB_PREVDIFF                    411
+#define IDB_NEXTCONFLICT                412
+#define IDB_PREVCONFLICT                413
+#define IDB_L2R                         414
+#define IDB_R2L                         415
+#define IDB_L2RNEXT                     416
+#define IDB_R2LNEXT                     417
+#define IDB_ALL_LEFT                    418
+#define IDB_ALL_RIGHT                   419
+#define IDB_AUTO_MERGE                  420
+#define IDB_OPTIONS                     421
+#define IDB_REFRESH                     422
 #define IDI_FOLDER                      500
 #define IDI_LFOLDER                     501
 #define IDI_MFOLDER                     502
@@ -229,6 +257,7 @@
 #define IDI_TREE_STATE_COLLAPSED        535
 #define IDI_TREE_STATE_EXPANDED         536
 #define IDI_FILE                        537
+#define IDI_PLUGINS                     538
 #define IDC_PATH0_BUTTON                1001
 #define IDC_PATH1_BUTTON                1002
 #define IDC_PATH2_BUTTON                1003
@@ -246,7 +275,7 @@
 #define IDC_IGNCASE_CHECK               1020
 #define IDC_COMPANY                     1021
 #define IDC_GNU_ASCII                   1022
-#define IDC_TREE_SITTER_MODE            1023
+#define IDC_HILITE_SYNTAX_MODE          1023
 #define IDC_SEMANTIC_MERGE_CHECK        1024
 #define IDC_HILITE_CHECK                1025
 #define IDC_IGNOREREGEXP                1026
@@ -279,6 +308,7 @@
 #define IDC_DIFF_BROWSE_RESULT          1077
 #define IDC_DIFF_APPENDFILE             1078
 #define IDC_DIFF_COPYCLIPBOARD          1079
+#define IDC_DIFF_WINDOW_LIST            1080
 #define IDC_FILES_DIRS_GROUP0           1082
 #define IDC_FILES_DIRS_GROUP1           1083
 #define IDC_FILES_DIRS_GROUP2           1084
@@ -460,12 +490,17 @@
 #define IDC_SELECTION_TEXT_COLOR        1287
 #define IDC_REGULAR_TEXT_COLOR          1288
 #define IDC_AUTO_COMPLETE_SOURCE        1289
+#define IDC_REPORT_WINDOW_LIST          1290
+#define IDC_REPORT_INCLUDE_ALL_IMAGE_PAGES 1291
+#define IDC_REPORT_OPENREPORTFILE       1292
+#define IDC_REPORT_INFOICON             1293
+#define IDC_REPORT_INFO                 1294
 #define IDC_FILTER_USER_BROWSE          1297
 #define IDC_FILTER_USER_PATH            1298
 #define IDC_FILTERCOMMENTS_CHECK        1299
 #define IDC_IGNORETRAILINGPUNCT_CHECK   1698
 #define IDC_TREE_SITTER_OCCURRENCE_CHECK 1699
-#define IDC_TREE_SITTER_BREADCRUMB_CHECK 1700
+#define IDC_TREE_SITTER_BREADCRUMB_CHECK 1719
 #define IDC_FINDDLG_DONTWRAP            1302
 #define IDC_REPORT_COPYCLIPBOARD        1303
 #define IDC_FILTERFILE_INSTALL          1304
@@ -549,10 +584,18 @@
 #define IDC_SYNTAX_LIST                 1393
 #define IDC_COMPAREIMAGE_PATTERNS       1394
 #define IDC_COMPAREIMAGE_OCR_RESULT_TYPE 1396
-#define IDC_COMPAREBINARY_PATTERNS      1397
-#define IDC_COMPAREBINARY_VIEWSETTINGS  1398
-#define IDC_COMPAREBINARY_BINARYMODE    1399
-#define IDC_COMPAREBINARY_CHARACTERSET  1400
+#define IDC_COMPAREIMAGE_PREFER_WIC_DECODER 1397
+#define IDC_COMPAREBINARY_PATTERNS      1400
+#define IDC_COMPAREBINARY_VIEWSETTINGS  1401
+#define IDC_COMPAREBINARY_BINARYMODE    1402
+#define IDC_COMPAREBINARY_CHARACTERSET  1403
+#define IDC_ARCHIVE_LIST                1430
+#define IDC_ARCHIVE_FILE                1431
+#define IDC_ARCHIVE_BROWSE              1432
+#define IDC_ARCHIVE_REPORT              1433
+#define IDC_ARCHIVE_PATCH               1434
+#define IDC_ARCHIVE_PROJECT             1435
+#define IDC_ARCHIVE_COPYCLIPBOARD       1436
 #define IDC_ENABLE_IMGCMP_IN_DIRCMP     1401
 #define IDC_COMPARETABLE_CSV            1402
 #define IDC_COMPARETABLE_TSV            1403
@@ -726,6 +769,7 @@
 #define IDC_MATCHINSIDE_EXPR2           1715
 #define IDC_MATCHINSIDE_EXPR1_BUTTON    1716
 #define IDC_MATCHINSIDE_EXPR2_BUTTON    1717
+#define IDC_MERGE_RESULT_PANE_ENABLED   1718
 #define IDC_EDIT_WHOLE_WORD             8603
 #define IDC_EDIT_MATCH_CASE             8604
 #define IDC_EDIT_FINDTEXT               8605
@@ -753,7 +797,7 @@
 #define ID_DIFF_OPTIONS_IGNORE_COMMENTS 16430
 #define ID_DIFF_OPTIONS_IGNORE_MISSING_TRAILING_EOL 16431
 #define ID_DIFF_OPTIONS_IGNORE_LINE_BREAKS 16432
-#define ID_DIFF_OPTIONS_IGNORE_TRAILING_PUNCTUATION 34194
+#define ID_DIFF_OPTIONS_IGNORE_TRAILING_PUNCTUATION 32903
 #define ID_DIFF_OPTIONS_INCLUDE_SUBFOLDERS 16433
 #define ID_DIFF_OPTIONS_COMPMETHOD_FULL_CONTENTS 16434
 #define ID_DIFF_OPTIONS_COMPMETHOD_QUICK_CONTENTS 16435
@@ -807,8 +851,7 @@
 #define ID_EDITOR_EDIT_PATH             18186
 #define ID_EDITOR_OPEN_CLIPBOARD        18187
 #define ID_EDITOR_SELECT_FILE           18188
-#define ID_EDITOR_RECENT_FILES          18189
-#define ID_EDITOR_CLIPBOARD_HISTORY     18190
+#define ID_EDITOR_SAVE_FILE             18189
 #define ID_EDITOR_RECENT_FIRST          18200
 #define ID_EDITOR_RECENT_LAST           18219
 #define ID_EDITOR_CLIPBOARD_FIRST       18220
@@ -894,44 +937,46 @@
 #define ID_ALL_RIGHT                    32856
 #define ID_ALL_LEFT                     32857
 #define ID_AUTO_MERGE                   32858
-#define ID_SEMANTIC_MERGE               32891
-#define ID_SEMANTIC_MERGE_LEFT          32892
-#define ID_SEMANTIC_MERGE_MIDDLE        32893
-#define ID_SEMANTIC_MERGE_RIGHT         32894
-#define ID_SEMANTIC_MERGE_ALL           32895
-#define ID_SEMANTIC_MERGE_AUTO_FALLBACK 32896
+#define ID_SEMANTIC_MERGE               32897
+#define ID_SEMANTIC_MERGE_LEFT          32898
+#define ID_SEMANTIC_MERGE_MIDDLE        32899
+#define ID_SEMANTIC_MERGE_RIGHT         32900
+#define ID_SEMANTIC_MERGE_ALL           32901
+#define ID_SEMANTIC_MERGE_AUTO_FALLBACK 32902
 #define ID_MERGE_DELETE                 32859
 #define ID_TOOLS_CUSTOMIZECOLUMNS       32860
 #define ID_TOOLS_GENERATEPATCH          32861
 #define ID_TOOLS_FILTERS                32862
 #define ID_TOOLS_GENERATEREPORT         32863
-#define ID_MERGE_COMPARE_WITH_MOVED_RENAMED 32864
-#define ID_MERGE_COMPARE                32865
-#define ID_MERGE_COMPARE_IN_NEW_WINDOW  32866
-#define ID_MERGE_COMPARE_TEXT           32867
-#define ID_MERGE_COMPARE_TABLE          32868
-#define ID_MERGE_COMPARE_HEX            32869
-#define ID_MERGE_COMPARE_IMAGE          32870
-#define ID_MERGE_COMPARE_WEBPAGE        32871
-#define ID_MERGE_COMPARE_FOLDER         32872
-#define ID_MERGE_COMPARE_LEFT1_LEFT2    32873
-#define ID_MERGE_COMPARE_RIGHT1_RIGHT2  32874
-#define ID_MERGE_COMPARE_LEFT1_RIGHT2   32875
-#define ID_MERGE_COMPARE_LEFT2_RIGHT1   32876
-#define ID_UNPACK_MANUAL                32877
-#define ID_UNPACK_AUTO                  32878
-#define ID_OPEN_WITH_UNPACKER           32879
-#define ID_NO_PREDIFFER                 32880
-#define ID_SUGGESTED_PLUGINS            32881
-#define ID_NOT_SUGGESTED_PLUGINS        32882
-#define ID_RELOAD_PLUGINS               32883
-#define ID_NO_UNPACKER                  32884
-#define ID_APPLY_PREDIFFER              32885
-#define ID_TRANSFORM_WITH_SCRIPT        32886
-#define ID_SELECT_EDITOR_SCRIPT_FOR_COPYING 32887
-#define ID_WINDOW_CLOSEALL              32888
-#define ID_WINDOW_NEXT                  32889
-#define ID_WINDOW_PREV                  32890
+#define ID_TOOLS_GENERATEARCHIVE        32864
+#define ID_MERGE_COMPARE_WITH_MOVED_RENAMED 32865
+#define ID_MERGE_COMPARE                32866
+#define ID_MERGE_COMPARE_IN_NEW_WINDOW  32867
+#define ID_MERGE_COMPARE_TEXT           32868
+#define ID_MERGE_COMPARE_TABLE          32869
+#define ID_MERGE_COMPARE_HEX            32870
+#define ID_MERGE_COMPARE_IMAGE          32871
+#define ID_MERGE_COMPARE_WEBPAGE        32872
+#define ID_MERGE_COMPARE_FOLDER         32873
+#define ID_MERGE_COMPARE_LEFT1_LEFT2    32874
+#define ID_MERGE_COMPARE_RIGHT1_RIGHT2  32875
+#define ID_MERGE_COMPARE_LEFT1_RIGHT2   32876
+#define ID_MERGE_COMPARE_LEFT2_RIGHT1   32877
+#define ID_UNPACK_MANUAL                32878
+#define ID_UNPACK_AUTO                  32879
+#define ID_OPEN_WITH_UNPACKER           32880
+#define ID_NO_PREDIFFER                 32881
+#define ID_SUGGESTED_PLUGINS            32882
+#define ID_NOT_SUGGESTED_PLUGINS        32883
+#define ID_RELOAD_PLUGINS               32884
+#define ID_NO_UNPACKER                  32885
+#define ID_APPLY_PREDIFFER              32886
+#define ID_TRANSFORM_WITH_SCRIPT        32887
+#define ID_SELECT_EDITOR_SCRIPT_FOR_COPYING 32888
+#define ID_WINDOW_CLOSEALL              32889
+#define ID_WINDOW_NEXT                  32890
+#define ID_WINDOW_PREV                  32891
+#define ID_WINDOW_PRESERVE_SPLITTER_RATIOS 32892
 #define ID_HELP_CONTENTS                32912
 #define ID_HELP_GETCONFIG               32913
 #define ID_HELP_GNULICENSE              32914
@@ -1010,7 +1055,7 @@
 #define ID_PROJECT_DIFF_OPTIONS_IGNORE_COMMENTS 33132
 #define ID_PROJECT_DIFF_OPTIONS_IGNORE_MISSING_TRAILING_EOL 33133
 #define ID_PROJECT_DIFF_OPTIONS_IGNORE_LINE_BREAKS 33134
-#define ID_PROJECT_DIFF_OPTIONS_IGNORE_TRAILING_PUNCTUATION 34195
+#define ID_PROJECT_DIFF_OPTIONS_IGNORE_TRAILING_PUNCTUATION 32904
 #define ID_PROJECT_DIFF_OPTIONS_COMPMETHOD_FULL_CONTENTS 33135
 #define ID_PROJECT_DIFF_OPTIONS_COMPMETHOD_QUICK_CONTENTS 33136
 #define ID_PROJECT_DIFF_OPTIONS_COMPMETHOD_BINARY_CONTENTS 33137
@@ -1060,25 +1105,27 @@
 #define IDS_COLORSCHEME_PHP             33181
 #define IDS_COLORSCHEME_PO              33182
 #define IDS_COLORSCHEME_POWERSHELL      33183
-#define IDS_COLORSCHEME_PYTHON          33184
-#define IDS_COLORSCHEME_REXX            33185
-#define IDS_COLORSCHEME_RSRC            33186
-#define IDS_COLORSCHEME_RUBY            33187
-#define IDS_COLORSCHEME_RUST            33188
-#define IDS_COLORSCHEME_SGML            33189
-#define IDS_COLORSCHEME_SH              33190
-#define IDS_COLORSCHEME_SIOD            33191
-#define IDS_COLORSCHEME_SMARTY          33192
-#define IDS_COLORSCHEME_SQL             33193
-#define IDS_COLORSCHEME_TCL             33194
-#define IDS_COLORSCHEME_TEX             33195
-#define IDS_COLORSCHEME_TSX             33196
-#define IDS_COLORSCHEME_TYPESCRIPT      33197
-#define IDS_COLORSCHEME_VERILOG         33198
-#define IDS_COLORSCHEME_VHDL            33199
-#define IDS_COLORSCHEME_XML             33200
-#define IDS_COLORSCHEME_YAML            33201
-#define ID_COLORSCHEME_LAST             33201
+#define IDS_COLORSCHEME_PROPERTIES      33184
+#define IDS_COLORSCHEME_PYTHON          33185
+#define IDS_COLORSCHEME_REXX            33186
+#define IDS_COLORSCHEME_RSRC            33187
+#define IDS_COLORSCHEME_RUBY            33188
+#define IDS_COLORSCHEME_RUST            33189
+#define IDS_COLORSCHEME_SGML            33190
+#define IDS_COLORSCHEME_SH              33191
+#define IDS_COLORSCHEME_SIOD            33192
+#define IDS_COLORSCHEME_SMARTY          33193
+#define IDS_COLORSCHEME_SQL             33194
+#define IDS_COLORSCHEME_TCL             33195
+#define IDS_COLORSCHEME_TEX             33196
+#define IDS_COLORSCHEME_TOML            33197
+#define IDS_COLORSCHEME_TSX             33198
+#define IDS_COLORSCHEME_TYPESCRIPT      33199
+#define IDS_COLORSCHEME_VERILOG         33200
+#define IDS_COLORSCHEME_VHDL            33201
+#define IDS_COLORSCHEME_XML             33202
+#define IDS_COLORSCHEME_YAML            33203
+#define ID_COLORSCHEME_LAST             33203
 #define ID_TOOLBAR_NONE                 33300
 #define ID_TOOLBAR_SMALL                33301
 #define ID_TOOLBAR_MEDIUM               33302
@@ -1147,6 +1194,18 @@
 #define ID_MICE_L2RNEXT                 33375
 #define ID_MICE_R2LNEXT                 33376
 #define ID_VIEW_MENU_BAR                33377
+#define ID_VIEW_MERGE_RESULT_BAR        33378
+#define ID_MERGE_RESULT_CHOOSE_1ST      33379
+#define ID_MERGE_RESULT_CHOOSE_2ND      33380
+#define ID_MERGE_RESULT_CHOOSE_3RD      33381
+#define ID_MERGE_RESULT_CHOOSE_ALL_1ST  33382
+#define ID_MERGE_RESULT_CHOOSE_ALL_2ND  33383
+#define ID_MERGE_RESULT_CHOOSE_ALL_3RD  33384
+#define ID_FILE_SAVE_MERGE_RESULT       33385
+#define ID_FILE_SAVEAS_MERGE_RESULT     33386
+#define ID_MERGE_START_SESSION          33387
+#define ID_MERGE_CHOOSE_THIS            33388
+#define ID_MERGE_END_SESSION            33389
 #define ID_TABBAR_AUTO_MAXWIDTH         33451
 #define ID_IMG_VIEWDIFFERENCES          33453
 #define ID_IMG_ZOOM_25                  33454
@@ -1265,6 +1324,10 @@
 #define ID_LASTFILE                     34185
 #define ID_USE_FIRST_LINE_AS_HEADERS    34190
 #define ID_AUTO_FIT_ALL_COLUMNS         34191
+#define ID_IGNORE_COLUMN_IN_COMPARISON  34192
+#define ID_IGNORE_COLUMN_IN_COMPARISON_THIS_PANE_ONLY 34193
+#define ID_IGNORE_COLUMN_IN_COMPARISON_RESET 34194
+#define ID_IGNORE_COLUMN_IN_COMPARISON_CTRL_CLICK_TO_ADD_HINT 34195
 #define ID_UNPACKERS_FIRST              35001
 #define ID_UNPACKERS_LAST               35200
 #define ID_PREDIFFERS_FIRST             35201
@@ -1708,6 +1771,7 @@
 #define IDS_PROJECTFILES_EXT            40420
 #define IDS_INIFILES                    40421
 #define IDS_REPLACELIST_FILES           40422
+#define IDS_ARCHIVEFILES                40423
 #define IDS_FILTERFILE_NAMETITLE        40448
 #define IDS_FILTERFILE_PATHTITLE        40449
 #define IDS_FILTER_TITLE                40450
@@ -1740,7 +1804,6 @@
 #define IDS_LINE_STATUS_INFO_EOL        40832
 #define IDS_EMPTY_LINE_STATUS_INFO      40833
 #define IDS_LINE_STATUS_INFO            40834
-#define IDS_MERGEMODE_MERGING           40835
 #define IDS_DIFF_NUMBER_STATUS_FMT      40836
 #define IDS_NO_DIFF_SEL_FMT             40837
 #define IDS_1_DIFF_FOUND                40838
@@ -1772,16 +1835,16 @@
 #define IDS_NOT_CONFLICT_FILE           41223
 #define IDS_SAVE_AS_TITLE               41232
 #define IDS_SAVE_FMT                    41233
-#define IDS_SAVEREADONLY_FMT            41234
+#define IDS_SAVEREADONLY_FMT            41234 // Persistent key for "Don't ask again"
 #define IDS_ERROR_BACKUP                41236
-#define IDS_BACKUP_FAILED_PROMPT        41237
+#define IDS_BACKUP_FAILED_PROMPT        41237 // Persistent key for "Don't ask again"
 #define IDS_FILESAVE_FAILED             41238
 #define IDS_FILEPACK_FAILED_LEFT        41239
 #define IDS_FILEPACK_FAILED_MIDDLE      41240
 #define IDS_FILEPACK_FAILED_RIGHT       41241
 #define IDS_FILECHANGED_ONDISK          41242
-#define IDS_SAVEREADONLY_MULTI          41243
-#define IDS_FILECHANGED_RESCAN          41244
+#define IDS_SAVEREADONLY_MULTI          41243 // Persistent key for "Don't ask again"
+#define IDS_FILECHANGED_RESCAN          41244 // Persistent key for "Don't ask again"
 #define IDS_SAVE_LEFT_AS                41245
 #define IDS_SAVE_MIDDLE_AS              41246
 #define IDS_SAVE_RIGHT_AS               41247
@@ -1833,7 +1896,7 @@
 #define IDS_FILES_AFFECTED_FMT          41690
 #define IDS_FILES_AFFECTED_FMT2         41691
 #define IDS_CONFIRM_DELETE_SINGLE       41692
-#define IDS_CONFIRM_SINGLE_COPY         41693
+#define IDS_CONFIRM_SINGLE_COPY         41693 // Persistent key for "Don't ask again"
 #define IDS_CONFIRM_MULTIPLE_COPY       41694
 #define IDS_DIRCMP_NOTSYNC              41695
 #define IDS_CONFIRM_SINGLE_MOVE         41696
@@ -1841,11 +1904,11 @@
 #define IDS_CONFIRM_COPY_CAPTION        41698
 #define IDS_CONFIRM_MOVE_CAPTION        41699
 #define IDS_CONFIRM_CLOSE_WINDOW_COMPARING 41700
-#define IDS_CONFIRM_CLOSE_WINDOW_LONG_COMPARISON 41701
+#define IDS_CONFIRM_CLOSE_WINDOW_LONG_COMPARISON 41701 // Persistent key for "Don't ask again"
 #define IDS_ERROR_INVALID_DIR_FILE_NAME 41702
 #define IDS_ERROR_EXECUTE_FILE          41719
 #define IDS_UNKNOWN_ARCHIVE_FORMAT      41731
-#define IDS_FAILED_EXTRACT_ARCHIVE_FILES 41732
+#define IDS_FAILED_EXTRACT_ARCHIVE_FILES 41732 // Persistent key for "Don't ask again"
 #define IDS_COLHDR_FILENAME             41751
 #define IDS_COLHDR_DIR                  41752
 #define IDS_COLHDR_RESULT               41753
@@ -1987,28 +2050,28 @@
 #define IDS_REPORT_TABLIST              41991
 #define IDS_REPORT_SIMPLEHTML           41992
 #define IDS_REPORT_SIMPLEXML            41993
-#define IDS_REPORT_FILEOVERWRITE        41994
+#define IDS_REPORT_FILEOVERWRITE        41994 // Persistent key for "Don't ask again"
 #define IDS_REPORT_ERROR                41995
 #define IDS_REPORT_SUCCESS              41996
 #define IDS_SYNCPOINT_LASTBLOCK         42000
-#define IDS_FILE_TO_ITSELF              42100
-#define IDS_FILESSAME                   42101
+#define IDS_FILE_TO_ITSELF              42100 // Persistent key for "Don't ask again"
+#define IDS_FILESSAME                   42101 // Persistent key for "Don't ask again"
 #define IDS_FILESSAME_CURCFG            42102
 #define IDS_FILESSAME_BINERROR          42103
 #define IDS_FILESSAME_BINSAME           42104
 #define IDS_FILESSAME_BINDIFF           42105
 #define IDS_FILEERROR                   42107
 #define IDS_TEMP_FILEERROR              42108
-#define IDS_SUGGEST_IGNOREEOL           42109
+#define IDS_SUGGEST_IGNOREEOL           42109 // Persistent key for "Don't ask again"
 #define IDS_INVALID_DIRECTORY           42110
 #define IDS_CANNOT_OPEN_BINARYFILE      42111
-#define IDS_CREATE_PAIR_FOLDER          42112
-#define IDS_MOVE_TO_NEXTFILE            42113
-#define IDS_MOVE_TO_PREVFILE            42114
-#define IDS_MOVE_TO_NEXTPAGE            42115
-#define IDS_MOVE_TO_PREVPAGE            42116
-#define IDS_MOVE_TO_FIRSTFILE           42117
-#define IDS_MOVE_TO_LASTFILE            42118
+#define IDS_CREATE_PAIR_FOLDER          42112 // Persistent key for "Don't ask again"
+#define IDS_MOVE_TO_NEXTFILE            42113 // Persistent key for "Don't ask again"
+#define IDS_MOVE_TO_PREVFILE            42114 // Persistent key for "Don't ask again"
+#define IDS_MOVE_TO_NEXTPAGE            42115 // Persistent key for "Don't ask again"
+#define IDS_MOVE_TO_PREVPAGE            42116 // Persistent key for "Don't ask again"
+#define IDS_MOVE_TO_FIRSTFILE           42117 // Persistent key for "Don't ask again"
+#define IDS_MOVE_TO_LASTFILE            42118 // Persistent key for "Don't ask again"
 #define IDS_SUGGEST_IGNORECODEPAGE      42131
 #define IDS_LOSSY_TRANSCODING_FIRST     42132
 #define IDS_LOSSY_TRANSCODING_SECOND    42133
@@ -2016,16 +2079,16 @@
 #define IDS_LOSSY_TRANSCODING_BOTH      42135
 #define IDS_LINEDIFF_NODIFF             42151
 #define IDS_LINEDIFF_NODIFF_CAPTION     42152
-#define IDS_NUM_REPLACED                42161
+#define IDS_NUM_REPLACED                42161 // Persistent key for "Don't ask again"
 #define IDS_EDIT_TEXT_NOT_FOUND         42162
-#define IDS_MERGE_MODE                  42181
+#define IDS_MERGE_MODE                  42181 // Persistent key for "Don't ask again"
 #define IDS_LOCBAR_CAPTION              42201
 #define IDS_DIFFBAR_CAPTION             42202
 #define IDS_OUTPUTBAR_CAPTION           42203
-#define IDS_DIFF_SUCCEEDED              42400
-#define IDS_DIFF_ITEM1NOTFOUND          42401
-#define IDS_DIFF_ITEM2NOTFOUND          42402
-#define IDS_DIFF_FILEOVERWRITE          42403
+#define IDS_ARCHIVE_SUCCEEDED           42300
+#define IDS_ARCHIVE_SAVEFILES           42301
+#define IDS_DIFF_SUCCEEDED              42400 // Persistent key for "Don't ask again"
+#define IDS_DIFF_FILEOVERWRITE          42403 // Persistent key for "Don't ask again"
 #define IDS_DIFF_SELECTEDFILES          42404
 #define IDS_DIFF_NORMAL                 42405
 #define IDS_DIFF_CONTEXT                42406
@@ -2034,7 +2097,7 @@
 #define IDS_FILEWRITE_ERROR             42409
 #define IDS_PATH_NOT_ABSOLUTE           42410
 #define IDS_MUST_SPECIFY_OUTPUT         42411
-#define IDS_CANNOT_CREATE_BINARYPATCH   42412
+#define IDS_CANNOT_CREATE_BINARYPATCH   42412 // Persistent key for "Don't ask again"
 #define IDS_SAVEFILES_FORPATCH          42414
 #define IDS_FOLDER_NOTEXIST             42415
 #define IDS_RENAME_MOVE_DETECTION_DISALBED     42420
@@ -2047,7 +2110,7 @@
 #define IDS_RENAMED_MOVED               42427
 #define IDS_RENAMED_MOVED_ITEMS         42428
 #define IDS_RENAMED_MOVED_RESULT        42429
-#define IDS_SWITCH_FLAT_MODE            42430
+#define IDS_SWITCH_FLAT_MODE            42430 // Persistent key for "Don't ask again"
 #define IDS_NO_ZIP_SUPPORT              42449
 #define IDS_OPT_EXPORT_CAPTION          42452
 #define IDS_OPT_IMPORT_CAPTION          42453
@@ -2062,7 +2125,7 @@
 #define IDS_UNK_ERROR_SAVING_PROJECT    42511
 #define IDS_PROJFILE_LOAD_SUCCESS       42513
 #define IDS_PROJFILE_SAVE_SUCCESS       42514
-#define IDS_PROJFILE_CONTAIN_PLUGIN_ARGS 42515
+#define IDS_PROJFILE_CONTAIN_PLUGIN_ARGS 42515 // Persistent key for "Don't ask again"
 #define IDS_TEXT_REPORT_FILES           42540
 #define IDS_HTML_REPORT_FILES           42541
 #define IDS_XML_REPORT_FILES            42542
@@ -2072,10 +2135,13 @@
 #define IDS_AUTOCOMPLETE_MRU            43144
 #define IDS_NOTINSTALLED                43229
 #define IDS_AUTO_MERGE                  43241
+#define IDS_MERGE_SESSION_STARTED       43242 // Persistent key for "Don't ask again"
+#define IDS_PANE_ROLES                  43243
 #define IDS_CODEPAGE_MERGED             43244
 #define IDS_CODEPAGE_CONFLICT           43245
 #define IDS_EOL_MERGED                  43246
 #define IDS_EOL_CONFLICT                43247
+#define IDS_MERGERESULT_MENU            43351
 #define IDS_IMAGE_MENU                  43352
 #define IDS_WEBPAGE_MENU                43353
 #define IDS_VIEW_WRAP_TEXT              43354
@@ -2175,7 +2241,7 @@
 #define IDS_IMGCMP_STATUS_FLIPPED_FMT   44154
 #define IDS_IMGCMP_STATUS_ROTATED_FMT   44155
 #define IDS_IMGCMP_REPORT_ALLPAGES      44156
-#define IDS_COMPARE_LARGE_FILES         44165
+#define IDS_COMPARE_LARGE_FILES         44165 // Persistent key for "Don't ask again"
 #define IDS_OCRRESULT_TEXTONLY          44166
 #define IDS_OCRRESULT_POS_LINE          44167
 #define IDS_OCRRESULT_POS_WORD          44168
@@ -2221,6 +2287,7 @@
 #define IDS_PLUGIN_TARGETS_1ST_2ND      44504
 #define IDS_PLUGIN_TARGETS_1ST_3RD      44505
 #define IDS_PLUGIN_TARGETS_2ND_3RD      44506
+#define IDS_PLUGIN_CTRL_CLICK           44507
 #define IDS_L2M                         44600
 #define IDS_R2M                         44601
 #define IDS_COPY_FROM_MIDDLE_R          44602
@@ -2235,7 +2302,7 @@
 #define IDS_CLIPBOARDHISTORY_NOT_SUPPORTED2 44613
 #define IDS_WEBVIEW2_RUNTIME_NOT_INSTALLED 44614
 #define IDS_PROJECT_ITEM_HIDDEN_ITEMS   44615
-#define IDS_CONFIRM_COPY_ALL_DIFFS      44616
+#define IDS_CONFIRM_COPY_ALL_DIFFS      44616 // Persistent key for "Don't ask again"
 #define IDS_JUMPLIST_NEW_TEXT_COMPARE   44617
 #define IDS_JUMPLIST_NEW_TABLE_COMPARE  44618
 #define IDS_JUMPLIST_NEW_BINARY_COMPARE 44619
@@ -2263,7 +2330,7 @@
 #define IDS_COPY_GRANULARITY_LINE       44643
 #define IDS_COPY_GRANULARITY_Character  44644
 #define IDS_VIEW_MENU_BAR               44645
-#define IDS_COPY_ONLYDIFFITEMS          44646
+#define IDS_ONLYDIFFITEMS_CONFIRM       44646 // Persistent key for "Don't ask again"
 #define IDS_LOG_COMPARING_2             44650
 #define IDS_LOG_COMPARING_3             44651
 #define IDS_LOG_COMPARE_COMPLETED       44652
@@ -2292,6 +2359,7 @@
 #define IDS_FILTER_ERROR_UNKNOWN_ERROR  44675
 #define IDS_FILTER_ERROR_INVALID_PROPERTY_NAME 44676
 #define IDS_FILTER_ERROR_INVALID_DIRECTIVE 44677
+#define IDS_FILTER_ERROR_INVALID_ARGUMENT 44678
 #define IDS_FILTER_OP_EQUALS            44680
 #define IDS_FILTER_OP_NOT_EQUALS        44681
 #define IDS_FILTER_OP_LESS_THAN         44682
@@ -2315,18 +2383,34 @@
 #define IDS_DETECTED_PREVIOUS_CRASH     44721
 #define IDS_REGEX_REPLACE_LIST_TEMPLATE 44722
 #define IDS_STRING_REPLACE_LIST_TEMPLATE 44723
-#define IDS_TREE_SITTER_MODE_PREFER_TREE_SITTER 44724
-#define IDS_TREE_SITTER_MODE_PREFER_BUILT_IN 44725
-
+#define IDS_HILITE_SYNTAX_MODE_BUILT_IN_ONLY 44724
+#define IDS_HILITE_SYNTAX_MODE_BUILT_IN_FIRST 44725
+#define IDS_HILITE_SYNTAX_MODE_TREE_SITTER_FIRST 44726
+#define IDS_HILITE_SYNTAX_MODE_TREE_SITTER_ONLY 44727
+#define IDS_MDIBUTTONS_AUTOHIDE         44730
+#define IDS_MDIBUTTONS_ALWAYSSHOW       44731
+#define IDS_MDIBUTTONS_ALWAYSHIDE       44732
+#define IDS_MERGE_RESULT_UNRESOLVED_CONFIRM_CLOSE 44733
+#define IDS_MERGE_RESULT_UNSAVED_CONFIRM_SAVE 44734
+#define IDS_MERGE_RESULT_CONFLICT_WHITESPACE 44736
+#define IDS_MERGE_RESULT_CONFLICT       44737
+#define IDS_MERGE_RESULT_UNRESOLVED     44738
+#define IDS_MERGE_RESULT_NOLINES        44739
+#define IDS_MERGE_RESULT_OPTIONS_CHANGED 44740
+#define IDS_MERGE_RESULT_SAVE_AS        44743
+#define IDS_MERGE_RESULT_SAVE_FAILED    44744
+#define IDS_MERGE_RESULT_SAVE_MERGE_RESULT 44745
+#define IDS_MERGE_RESULT_STATUS_CONFLICTS2 44748
+#define IDS_MERGE_RESULT_STATUS_CONFLICTS3 44749
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
-#define _APS_NEXT_RESOURCE_VALUE        293
-#define _APS_NEXT_COMMAND_VALUE         34196
-#define _APS_NEXT_CONTROL_VALUE         1701
+#define _APS_NEXT_RESOURCE_VALUE        290
+#define _APS_NEXT_COMMAND_VALUE         38931
+#define _APS_NEXT_CONTROL_VALUE         1696
 #define _APS_NEXT_SYMED_VALUE           134
 #endif
 #endif

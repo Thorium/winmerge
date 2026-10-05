@@ -92,6 +92,10 @@ public:
 	static std::vector<JumpList::Item> CreateUserTasks(MergeCmdLineInfo::usertasksflags_t flags);
 	bool GetMergingMode() const;
 	void SetMergingMode(bool bMergingMode);
+	void SetGroupName(const String& groupName) { m_sGroupName = groupName; }
+	const String& GetGroupName() const { return m_sGroupName; }
+	HANDLE CreateMutexHandle() const;
+	const tchar_t* GetWindowClassName() const;
 	static void SetupTempPath();
 	static void InitSyntaxParserFactories();
 	bool IsReallyIdle() const;
@@ -170,9 +174,6 @@ protected:
 	afx_msg BOOL OnOpenRecentFile(UINT nID);
 	afx_msg void OnAppAbout();
 	afx_msg void OnHelp();
-	afx_msg void OnMergingMode();
-	afx_msg void OnUpdateMergingMode(CCmdUI* pCmdUI);
-	afx_msg void OnUpdateMergingStatus(CCmdUI* pCmdUI);
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 private:
@@ -184,6 +185,8 @@ private:
 	LONG m_nActiveOperations; /**< Active operations count. */
 	bool m_bMergingMode; /**< Merging or Edit mode */
 	bool m_bEnableExitCode;
+	String m_sGroupName; /**< Group name for instance grouping */
+	mutable String m_sWindowClassName; /**< Window class name for instance grouping */
 	ATL::CImage m_imageForInitializingGdiplus;
 	std::list<std::function<void()>> m_idleFuncs;
 	std::list<CWinThread*> m_threads;

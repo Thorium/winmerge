@@ -37,7 +37,9 @@ public:
 // Attributes
 public:
 	static int m_nBuffersTemp;
+	static inline IMergeDoc::DocumentType m_documentTypeTemp;
 	int m_nBuffers;
+	IMergeDoc::DocumentType m_documentType;
 	PathContext m_filePaths; /**< Filepaths for this document */
 
 // Begin declaration of CHexMergeDoc
@@ -69,7 +71,8 @@ public:
 	void SetDirDoc(IDirDoc * pDirDoc) override;
 	void DirDocClosing(IDirDoc * pDirDoc) override;
 	bool CloseNow() override;
-	bool GenerateReport(const String& sFileName) const override { return true; }
+	bool GenerateReport(ReportContext& reportContext) const override { return true; }
+	IMergeDoc::DocumentType GetDocumentType() const override { return IMergeDoc::DocumentType::Binary; }
 	const PackingInfo* GetUnpacker() const override { return &m_infoUnpacker; };
 	PackingInfo* GetUnpacker() { return &m_infoUnpacker; };
 	void SetUnpacker(const PackingInfo* infoUnpacker) override { if (infoUnpacker) m_infoUnpacker = *infoUnpacker;  };

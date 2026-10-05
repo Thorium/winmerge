@@ -76,6 +76,8 @@
 #include "CrystalLineSyntaxParser.h"
 #include "TreeSitterParser.h"
 #include "SyntaxParserRegistry.h"
+#include "7zCommon.h"
+#include "PluginMenu.h"
 #include <../src/mfc/afximpl.h>
 
 #ifdef _DEBUG
@@ -91,9 +93,6 @@ BEGIN_MESSAGE_MAP(CMergeApp, CWinApp)
 	ON_COMMAND(ID_HELP, OnHelp)
 	ON_COMMAND_EX_RANGE(ID_FILE_PROJECT_MRU_FIRST, ID_FILE_PROJECT_MRU_LAST, OnOpenRecentFile)
 	ON_UPDATE_COMMAND_UI(ID_FILE_PROJECT_MRU_FIRST, CWinApp::OnUpdateRecentFileMenu)
-	ON_COMMAND(ID_FILE_MERGINGMODE, OnMergingMode)
-	ON_UPDATE_COMMAND_UI(ID_FILE_MERGINGMODE, OnUpdateMergingMode)
-	ON_UPDATE_COMMAND_UI(ID_STATUS_MERGINGMODE, OnUpdateMergingStatus)
 	ON_COMMAND(ID_FILE_PRINT_SETUP, CWinApp::OnFilePrintSetup)
 	//}}AFX_MSG_MAP
 	// Standard file based document commands
@@ -154,24 +153,23 @@ static COptionsMgr *CreateOptionManager(const MergeCmdLineInfo& cmdInfo)
 	return new CRegOptionsMgr(_T("Thingamahoochie\\WinMerge\\"));
 }
 
-static HANDLE CreateMutexHandle()
+HANDLE CMergeApp::CreateMutexHandle() const
 {
 	// Create exclusion mutex name
 	tchar_t szDesktopName[MAX_PATH] = _T("Win9xDesktop");
 	DWORD dwLengthNeeded;
 	GetUserObjectInformation(GetThreadDesktop(GetCurrentThreadId()), UOI_NAME,
 		szDesktopName, sizeof(szDesktopName), &dwLengthNeeded);
-	tchar_t szMutexName[MAX_PATH + 40];
 	// Combine window class name and desktop name to form a unique mutex name.
 	// As the window class name is decorated to distinguish between ANSI and
 	// UNICODE build, so will be the mutex name.
-	wsprintf(szMutexName, _T("%s-%s"), CMainFrame::szClassName, szDesktopName);
-	return CreateMutex(nullptr, FALSE, szMutexName);
+	String sMutexName = strutils::format(_T("%s-%s"), GetWindowClassName(), szDesktopName);
+	return CreateMutex(nullptr, FALSE, sMutexName.c_str());
 }
 
 static HWND ActivatePreviousInstanceAndSendCommandline(tchar_t* cmdLine)
 {
-	HWND hWnd = FindWindow(CMainFrame::szClassName, nullptr);
+	HWND hWnd = FindWindow(theApp.GetWindowClassName(), nullptr);
 	if (hWnd == nullptr)
 		return nullptr;
 	if (IsIconic(hWnd))
@@ -202,6 +200,24 @@ static int ConvertLastCompareResultToExitCode(int nLastCompareResult)
 	else if (nLastCompareResult > 0)
 		return 1;
 	return 2;
+}
+
+const tchar_t* CMergeApp::GetWindowClassName() const
+{
+	if (!m_sWindowClassName.empty())
+		return m_sWindowClassName.c_str();
+	static const tchar_t szClassName[] = _T("WinMergeWindowClassW");
+	if (!m_sGroupName.empty())
+	{
+		// Create class name with group: "WinMergeWindowClassW-groupname"
+		m_sWindowClassName = String(szClassName) + _T("-") + m_sGroupName;
+	}
+	else
+	{
+		// Use default class name
+		m_sWindowClassName = szClassName;
+	}
+	return m_sWindowClassName.c_str();
 }
 
 std::vector<JumpList::Item> CMergeApp::CreateUserTasks(MergeCmdLineInfo::usertasksflags_t flags)
@@ -317,7 +333,7 @@ BOOL CMergeApp::InitInstance()
 	ApplyCommandLineConfigOptions(cmdInfo);
 	if (cmdInfo.m_bForceSemanticMergeForThisRun)
 	{
-		GetOptionsMgr()->Set(OPT_TREE_SITTER_MODE, 1);
+		GetOptionsMgr()->Set(OPT_SYNTAX_HIGHLIGHT_MODE, 2);
 		GetOptionsMgr()->Set(OPT_SEMANTIC_MERGE_EXPERIMENTAL, true);
 	}
 	if (cmdInfo.m_sErrorMessages.size() > 0)
@@ -325,6 +341,10 @@ BOOL CMergeApp::InitInstance()
 		for (auto& msg : cmdInfo.m_sErrorMessages)
 			OutputConsole(msg);
 	}
+
+	// Store group name for later use by CMainFrame
+	if (!cmdInfo.m_sGroupName.empty())
+		SetGroupName(cmdInfo.m_sGroupName);
 
 	// Initialize temp folder
 	SetupTempPath();
@@ -390,7 +410,8 @@ BOOL CMergeApp::InitInstance()
 
 	// Install crash logger
 #ifndef _M_ARM
-	CrashLogger::Install();
+	if (IsWin10_OrGreater())
+		CrashLogger::Install();
 #else
 // NOTE:
 // CrashLogger is disabled on ARM32.
@@ -506,27 +527,30 @@ BOOL CMergeApp::InitInstance()
 
 void CMergeApp::InitSyntaxParserFactories()
 {
-	std::vector<LangServices::ISyntaxParserFactory*> factories = { &CrystalLineSyntaxParserFactory::GetInstance(), &TreeSitterSyntaxParserFactory::GetInstance() };
-	for (auto& factory : factories)
-		LangServices::SyntaxParserRegistry::GetInstance().UnregisterFactory(factory);
-	std::vector<LangServices::ISyntaxParserFactory*> factoriesNew;
-	switch (GetOptionsMgr()->GetInt(OPT_TREE_SITTER_MODE))
-	{
-	case 0: // Disable Tree-sitter
-		factoriesNew.push_back(&CrystalLineSyntaxParserFactory::GetInstance());
-		break;
-	case 1: // Prefer Tree-sitter
-		factoriesNew.push_back(&TreeSitterSyntaxParserFactory::GetInstance());
-		factoriesNew.push_back(&CrystalLineSyntaxParserFactory::GetInstance());
-		break;
-	case 2: // Prefer Built-in
-	default:
-		factoriesNew.push_back(&CrystalLineSyntaxParserFactory::GetInstance());
-		factoriesNew.push_back(&TreeSitterSyntaxParserFactory::GetInstance());
-		break;
-	}
-	for (auto& factory: factoriesNew)
-		LangServices::SyntaxParserRegistry::GetInstance().RegisterFactory(factory);
+	using namespace LangServices;
+
+	auto& registry = SyntaxParserRegistry::GetInstance();
+
+	auto& crystal = CrystalLineSyntaxParserFactory::GetInstance();
+	auto& treeSitter = TreeSitterSyntaxParserFactory::GetInstance();
+
+	const std::array<ISyntaxParserFactory*, 2> allFactories{ &crystal, &treeSitter };
+	for (auto* factory : allFactories)
+		registry.UnregisterFactory(factory);
+
+	static const std::array<std::vector<ISyntaxParserFactory*>, 4> modes{
+		std::vector<ISyntaxParserFactory*>{ &crystal },                 // Built-in only
+		std::vector<ISyntaxParserFactory*>{ &crystal,& treeSitter },    // Built-in first
+		std::vector<ISyntaxParserFactory*>{ &treeSitter,& crystal },    // Tree-sitter first
+		std::vector<ISyntaxParserFactory*>{ &treeSitter }               // Tree-sitter only
+	};
+
+	int mode = GetOptionsMgr()->GetInt(OPT_SYNTAX_HIGHLIGHT_MODE);
+	if (mode < 0 || mode >= static_cast<int>(modes.size()))
+		mode = 3;
+
+	for (auto* factory : modes[mode])
+		registry.RegisterFactory(factory);
 }
 
 void CMergeApp::OutputConsole(const String& message)
@@ -694,7 +718,8 @@ static String makeLogString(const tchar_t* lpszPrompt, int result)
 		_("Try Again"),
 		_("Continue"),
 	};
-	String msg = String(lpszPrompt) + _T(": ") + Answers[result];
+	String ans = (result < 0 || result >= static_cast<int>(Answers.size())) ? _T("Unknown") : Answers[result];
+	String msg = String(lpszPrompt) + _T(": ") + ans;
 	return msg;
 }
 
@@ -853,7 +878,8 @@ bool CMergeApp::ShowCompareAsMenu(MergeCmdLineInfo& cmdInfo)
 	if (!pPopup)
 		return false;
 	String filteredFilenames = strutils::join(cmdInfo.m_Files.begin(), cmdInfo.m_Files.end(), _T("|"));
-	CMainFrame::AppendPluginMenus(pPopup, filteredFilenames, FileTransform::UnpackerEventNames, true, ID_UNPACKERS_FIRST);
+	PluginMenu::AppendPluginMenus(pPopup, nullptr, filteredFilenames, FileTransform::UnpackerEventNames,
+		PluginMenu::AddAllMenu|PluginMenu::AddSelectMenu, ID_UNPACKERS_FIRST);
 
 	CPoint point;
 	GetCursorPos(&point);
@@ -891,7 +917,7 @@ bool CMergeApp::ShowCompareAsMenu(MergeCmdLineInfo& cmdInfo)
 		}
 		else if(nID >= ID_UNPACKERS_FIRST && nID <= ID_UNPACKERS_LAST)
 		{
-			cmdInfo.m_sUnpacker = CMainFrame::GetPluginPipelineByMenuId(nID, FileTransform::UnpackerEventNames, ID_UNPACKERS_FIRST);
+			cmdInfo.m_sUnpacker = PluginMenu::GetPluginPipelineByMenuId(nullptr, nID, FileTransform::UnpackerEventNames, ID_UNPACKERS_FIRST);
 		}
 		else
 		{
@@ -920,6 +946,29 @@ void CMergeApp::ShowDialog(MergeCmdLineInfo::DialogType type)
 	default:
 		break;
 	}
+}
+
+/**
+ * @brief Adjust file and folder paths for comparison.
+ */
+static PathContext AdjustFileFolderPaths(const PathContext& paths)
+{
+	PathContext pathsAdjusted = paths;
+	if (paths.GetSize() < 2)
+		return pathsAdjusted;
+	paths::PATH_EXISTENCE p1 = paths::DoesPathExist(paths[0]);
+	paths::PATH_EXISTENCE p2 = paths::DoesPathExist(paths[1]);
+	if ((p1 == paths::IS_EXISTING_FILE) && (p2 == paths::IS_EXISTING_DIR) && !IsArchiveFile(paths[0]))
+	{
+		pathsAdjusted[1] = paths::ConcatPath(paths[1], paths::FindFileName(paths[0]));
+		if (paths.GetSize() > 2)
+		{
+			paths::PATH_EXISTENCE p3 = paths::DoesPathExist(paths[2]);
+			if (p3 == paths::IS_EXISTING_DIR)
+				pathsAdjusted[2] = paths::ConcatPath(paths[2], paths::FindFileName(paths[0]));
+		}
+	}
+	return pathsAdjusted;
 }
 
 /** @brief Read command line arguments and open files for comparison.
@@ -1038,18 +1087,17 @@ bool CMergeApp::ParseArgsAndDoOpen(MergeCmdLineInfo& cmdInfo, CMainFrame* pMainF
 		}
 		if (cmdInfo.m_Files.GetSize() > 2)
 		{
-			cmdInfo.m_dwLeftFlags |= FFILEOPEN_CMDLINE;
-			cmdInfo.m_dwMiddleFlags |= FFILEOPEN_CMDLINE;
-			cmdInfo.m_dwRightFlags |= FFILEOPEN_CMDLINE;
+			PathContext paths = AdjustFileFolderPaths(cmdInfo.m_Files);
 			fileopenflags_t dwFlags[3] = {cmdInfo.m_dwLeftFlags, cmdInfo.m_dwMiddleFlags, cmdInfo.m_dwRightFlags};
-			bCompared = pMainFrame->DoFileOrFolderOpen(&cmdInfo.m_Files,
+			bCompared = pMainFrame->DoFileOrFolderOpen(&paths,
 				dwFlags, strDesc, cmdInfo.m_sReportFile, nullptr,
 				infoUnpacker.get(), infoPrediffer.get(), nID, pOpenParams.get());
 		}
 		else if (cmdInfo.m_Files.GetSize() > 1)
 		{
+			PathContext paths = AdjustFileFolderPaths(cmdInfo.m_Files);
 			fileopenflags_t dwFlags[3] = {cmdInfo.m_dwLeftFlags, cmdInfo.m_dwRightFlags, FFILEOPEN_NONE};
-			bCompared = pMainFrame->DoFileOrFolderOpen(&cmdInfo.m_Files,
+			bCompared = pMainFrame->DoFileOrFolderOpen(&paths,
 				dwFlags, strDesc, cmdInfo.m_sReportFile, nullptr,
 				infoUnpacker.get(), infoPrediffer.get(), nID, pOpenParams.get());
 		}
@@ -1405,9 +1453,10 @@ static bool ContainsPluginArguments(const String& pluginPipeline)
 {
 	String errorMessage;
 	auto plugins = PluginForFile::ParsePluginPipeline(pluginPipeline, errorMessage);
-	for (const auto& plugin : plugins)
+	for (const auto& pipelineItem : plugins)
 	{
-		if (!plugin.args.empty())
+		const auto* pPluginItem = PluginForFile::GetPluginPipelineItemPtr(pipelineItem);
+		if (pPluginItem && !pPluginItem->args.empty())
 			return true;
 	}
 	return false;
@@ -1507,7 +1556,7 @@ bool CMergeApp::LoadAndOpenProjectFile(const String& sProject, const String& sRe
 		for (int i = 0; i < tFiles.GetSize(); ++i)
 		{
 			tFiles[i] = env::ExpandEnvironmentVariables(tFiles[i]);
-			if (!paths::IsPathAbsolute(tFiles[i]) && !paths::IsURL(tFiles[i]))
+			if (!paths::IsPathAbsolute(tFiles[i]) && !paths::IsURL(tFiles[i]) && !tFiles[i].empty())
 			{
 				String sProjectDir = paths::GetParentPath(sProject);
 				if (tFiles[i].substr(0, 1) == _T("\\"))
@@ -1659,44 +1708,12 @@ bool CMergeApp::GetMergingMode() const
 }
 
 /**
- * @brief Set doc to Merging/Editing mode
+ * @brief Set Merging/Editing mode
  */
 void CMergeApp::SetMergingMode(bool bMergingMode)
 {
 	m_bMergingMode = bMergingMode;
 	GetOptionsMgr()->SaveOption(OPT_MERGE_MODE, m_bMergingMode);
-}
-
-/**
- * @brief Switch Merging/Editing mode and update
- * buffer read-only states accordingly
- */
-void CMergeApp::OnMergingMode()
-{
-	bool bMergingMode = GetMergingMode();
-
-	if (!bMergingMode)
-		I18n::MessageBox(IDS_MERGE_MODE, MB_ICONINFORMATION | MB_DONT_DISPLAY_AGAIN, IDS_MERGE_MODE);
-	SetMergingMode(!bMergingMode);
-}
-
-/**
- * @brief Update Menuitem for Merging Mode
- */
-void CMergeApp::OnUpdateMergingMode(CCmdUI* pCmdUI)
-{
-	pCmdUI->Enable(true);
-	pCmdUI->SetCheck(GetMergingMode());
-}
-
-/**
- * @brief Update MergingMode UI in statusbar
- */
-void CMergeApp::OnUpdateMergingStatus(CCmdUI *pCmdUI)
-{
-	String text = I18n::LoadString(IDS_MERGEMODE_MERGING);
-	pCmdUI->SetText(text.c_str());
-	pCmdUI->Enable(GetMergingMode());
 }
 
 UINT CMergeApp::GetProfileInt(const tchar_t* lpszSection, const tchar_t* lpszEntry, int nDefault)

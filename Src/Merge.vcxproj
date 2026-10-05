@@ -920,6 +920,24 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="FileCmpReport.cpp" />
+    <ClCompile Include="FileCmpReportDlg.cpp" />
+    <ClCompile Include="MergeLogger.cpp">
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
+    <ClCompile Include="MergeResultBar.cpp" />
+    <ClCompile Include="MergeResultContainer.cpp" />
+    <ClCompile Include="MergeResultTextBuffer.cpp" />
+    <ClCompile Include="MergeTextFormatter.cpp">
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
+    <ClCompile Include="PluginMenu.cpp" />
+    <ClCompile Include="SplitterPositions.cpp">
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="SyntaxParserHelper.cpp">
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
@@ -1004,15 +1022,21 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
+    <ClCompile Include="ArchiveDlg.cpp" />
+    <ClCompile Include="ArchiveTool.cpp" />
+    <ClCompile Include="DiffImageListUtils.cpp" />
     <ClInclude Include="ClipboardHistoryMenu.h" />
     <ClInclude Include="Common\ScopeExit.h" />
     <ClInclude Include="Common\ValidatingEdit.h" />
+    <ClInclude Include="FileCmpReport.h" />
+    <ClInclude Include="FileCmpReportDlg.h" />
     <ClInclude Include="FileFilterHelperMenu.h" />
     <ClInclude Include="DirFilterBar.h" />
     <ClInclude Include="ComparisonResultFilterDlg.h" />
     <ClInclude Include="FilterConditionDlg.h" />
     <ClInclude Include="FilterHelperMenuBase.h" />
     <ClInclude Include="FilterMenuHelpers.h" />
+    <ClInclude Include="FrameType.h" />
     <ClInclude Include="MatchInsideDlg.h" />
     <ClInclude Include="SemanticPreviewDlg.h" />
     <ClInclude Include="FilterErrorMessages.h" />
@@ -1021,6 +1045,13 @@
     <ClInclude Include="LineFilterBar.h" />
     <ClInclude Include="LineFilterHelper.h" />
     <ClInclude Include="LineFilterHelperMenu.h" />
+    <ClInclude Include="MergeDiffNavigation.h" />
+    <ClInclude Include="MergeConflictNavigation.h" />
+    <ClInclude Include="MergeLogger.h" />
+    <ClInclude Include="MergeResultBar.h" />
+    <ClInclude Include="MergeResultContainer.h" />
+    <ClInclude Include="MergeResultTextBuffer.h" />
+    <ClInclude Include="MergeTextFormatter.h" />
     <ClInclude Include="MruHelper.h" />
     <ClInclude Include="I18n.h" />
     <ClInclude Include="I18nGUI.h" />
@@ -1029,6 +1060,9 @@
     </ClInclude>
     <ClCompile Include="MenuBar.cpp" />
     <ClCompile Include="MergeDocDiffCopy.cpp" />
+    <ClCompile Include="MergeDocResultPane.cpp" />
+    <ClCompile Include="MergeResultStatusBar.cpp" />
+    <ClCompile Include="MergeResultView.cpp" />
     <ClCompile Include="MouseHook.cpp" />
     <ClCompile Include="MyColorDialog.cpp" />
     <ClCompile Include="MyFontDialog.cpp" />
@@ -1061,7 +1095,7 @@
     </ClCompile>
     <ClCompile Include="MergeFrameCommon.cpp" />
     <ClCompile Include="MergeEditFrm.cpp" />
-    <ClCompile Include="Common\ClipBoard.cpp">
+    <ClCompile Include="Common\Clipboard.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
@@ -1485,6 +1519,11 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
+    <ClCompile Include="TableProps.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="TempFile.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -1509,6 +1548,7 @@
     </ClCompile>
     <ClCompile Include="TestMain.cpp" />
     <ClCompile Include="TitleBarHelper.cpp" />
+    <ClCompile Include="ToolbarButtons.cpp" />
     <ClCompile Include="TrDialogs.cpp" />
     <ClCompile Include="Common\varprop.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -1526,6 +1566,7 @@
     </ClCompile>
     <ClCompile Include="WebPageDiffFrm.cpp" />
     <ClCompile Include="WildcardDropList.cpp" />
+    <ClCompile Include="WindowListCtrl.cpp" />
     <ClCompile Include="WindowsManager.cpp" />
     <ClCompile Include="WindowsManagerDialog.cpp" />
     <ClCompile Include="WinRtLoader.cpp" />
@@ -1538,6 +1579,9 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName)2.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
+    <ClInclude Include="ArchiveDlg.h" />
+    <ClInclude Include="ArchiveTool.h" />
+    <ClInclude Include="DiffImageListUtils.h" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Externals\boost\boost\config.hpp" />
@@ -1573,6 +1617,7 @@
     <ClInclude Include="HashCalc.h" />
     <ClInclude Include="IDirDoc.h" />
     <ClInclude Include="InternalPlugins.h" />
+    <ClInclude Include="PluginMenu.h" />
     <ClInclude Include="RenameMoveDetection.h" />
     <ClInclude Include="MyColorDialog.h" />
     <ClInclude Include="MyFontDialog.h" />
@@ -1587,12 +1632,13 @@
     <ClInclude Include="PropMessageBoxes.h" />
     <ClInclude Include="PropSysColors.h" />
     <ClInclude Include="ReplaceListHelper.h" />
+    <ClInclude Include="SplitterPositions.h" />
     <ClInclude Include="SemanticMergeAnalyzer.h" />
     <ClInclude Include="StructuralDiff.h" />
     <ClInclude Include="SubstitutionFiltersList.h" />
     <ClInclude Include="MergeFrameCommon.h" />
     <ClInclude Include="MergeEditFrm.h" />
-    <ClInclude Include="Common\ClipBoard.h" />
+    <ClInclude Include="Common\Clipboard.h" />
     <ClInclude Include="Common\CMoveConstraint.h" />
     <ClInclude Include="codepage_detect.h" />
     <ClInclude Include="Common\ColorButton.h" />
@@ -1627,6 +1673,9 @@
     <ClInclude Include="DiffTextBuffer.h" />
     <ClInclude Include="DiffThread.h" />
     <ClInclude Include="DiffViewBar.h" />
+    <ClInclude Include="MergeResultPane.h" />
+    <ClInclude Include="MergeResultStatusBar.h" />
+    <ClInclude Include="MergeResultView.h" />
     <ClInclude Include="DiffWrapper.h" />
     <ClInclude Include="DirCmpReport.h" />
     <ClInclude Include="DirCmpReportDlg.h" />
@@ -1760,6 +1809,7 @@
     <ClInclude Include="stringdiffsi.h" />
     <ClInclude Include="Common\SuperComboBox.h" />
     <ClInclude Include="SyntaxParserHelper.h" />
+    <ClInclude Include="TableProps.h" />
     <ClInclude Include="TempFile.h" />
     <ClInclude Include="TestMain.h" />
     <ClInclude Include="TestFilterDlg.h" />
@@ -1767,15 +1817,19 @@
     <ClInclude Include="Common\UnicodeString.h" />
     <ClInclude Include="Common\UniFile.h" />
     <ClInclude Include="TitleBarHelper.h" />
+    <ClInclude Include="ToolbarButtons.h" />
     <ClInclude Include="TrDialogs.h" />
     <ClInclude Include="Common\varprop.h" />
     <ClInclude Include="Common\VersionInfo.h" />
     <ClInclude Include="TreeSitterParser.h" />
     <ClInclude Include="WebPageDiffFrm.h" />
     <ClInclude Include="WildcardDropList.h" />
+    <ClInclude Include="WindowListCtrl.h" />
     <ClInclude Include="WindowsManager.h" />
     <ClInclude Include="WindowsManagerDialog.h" />
+    <ClInclude Include="WinIMergeLib.h" />
     <ClInclude Include="WinMergePluginBase.h" />
+    <ClInclude Include="WinWebDiffLib.h" />
     <ClInclude Include="Win_VersionHelper.h" />
     <ClInclude Include="WMGotoDlg.h" />
     <ClInclude Include="MergeAppCOMClass.h" />
@@ -1826,6 +1880,7 @@
   <ItemGroup>
     <Image Include="res\aborted.ico" />
     <Image Include="res\all.bmp" />
+    <Image Include="res\archive.bmp" />
     <Image Include="res\binarydiff12.ico" />
     <Image Include="res\binarydiff13.ico" />
     <Image Include="res\binarydiff23.ico" />

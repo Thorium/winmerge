@@ -1943,6 +1943,35 @@ WinMerge מאפשר לך לדכא כמה תיבות הודעות נפוצות. �
 המסך של WinMerge נראה איטי, כיבוי אפשרות זו עשוי לעזור.</para>
         </listitem>
       </itemizedlist>
+
+      <para>
+<option>Highlight mode</option> determines which syntax parser is used for
+syntax highlighting.</para>
+
+      <itemizedlist>
+        <listitem>
+          <para>
+<option>Built-in only</option>: Use only WinMerge's built-in syntax parser.</para>
+        </listitem>
+
+        <listitem>
+          <para>
+<option>Built-in first</option>: Prefer the built-in syntax parser. If it
+does not support the current file type, Tree-sitter is used.</para>
+        </listitem>
+
+        <listitem>
+          <para>
+<option>Tree-sitter first</option>: Prefer Tree-sitter. If Tree-sitter does
+not support the current file type, the built-in syntax parser is used.</para>
+        </listitem>
+
+        <listitem>
+          <para>
+<option>Tree-sitter only</option>: Use only Tree-sitter for syntax
+highlighting.</para>
+        </listitem>
+      </itemizedlist>
     </section>
 
     <section>
@@ -2217,6 +2246,41 @@ url="https://learn.microsoft.com/en-us/windows/win32/api/dwrite/ne-dwrite-dwrite
         <para>
 <xref linkend="CompareFiles_linediff-highlight" /> מסביר בפירוט רב יותר כיצד
 WinMerge מזהה ומסמן הבדלי שורות.</para>
+      </note>
+    </section>
+
+    <section>
+      <title>
+Use Merge Result Pane for 2/3-way merge<indexterm>
+          <primary>Merge Result Pane</primary>
+
+          <secondary>3-way merge configuration</secondary>
+        </indexterm></title>
+
+      <itemizedlist>
+        <listitem>
+          <para>
+<option>Disabled</option>: Three-way merges write the result to the target
+pane. Two-way conflict files open in the regular editable two-pane view.</para>
+        </listitem>
+
+        <listitem>
+          <para>
+<option>Enabled</option> (default): Three-way merges use a separate Merge
+Result pane instead of modifying the target pane. Two-way conflict files
+also open with a separate Merge Result pane. Review and edit the result
+there before saving it to the target file.</para>
+        </listitem>
+      </itemizedlist>
+
+      <note>
+        <title>Note about merge target pane selection</title>
+
+        <para>
+The merge target pane is determined by either the currently focused pane
+(for UI-based operations) or by the command-line options (/al, /am, /ar).
+This setting controls whether the results are written directly to the target
+pane or displayed in a separate Merge Result Pane for review.</para>
       </note>
     </section>
 

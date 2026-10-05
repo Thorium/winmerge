@@ -50,7 +50,7 @@ std::string SyntaxParserHelper::GetCommentsFilteredText(
 		}
 		
 		// Check if entire line is a comment
-		bool hasNonComment = false;
+		bool hasComment = false;
 		std::string lineText;
 		int nActualItems = static_cast<int>(blocks.size());
 
@@ -62,33 +62,30 @@ std::string SyntaxParserHelper::GetCommentsFilteredText(
 
 			// Skip comment blocks
 			if (nColorIndex == COLORINDEX_COMMENT)
+			{
+				hasComment = true;
 				continue;
+			}
 
 			if (nBlockStart < 0 || nBlockStart >= nFullLength)
 				continue;
-
-			tchar_t c = pszChars[nBlockStart];
-			if (c != '\r' && c != '\n')
-			{
-				// Found non-comment content
-				hasNonComment = true;
-			}
 
 			// Append non-comment text
 			if (nBlockEnd > nBlockStart)
 				lineText.append(ucr::toUTF8(pszChars + nBlockStart, nBlockEnd - nBlockStart));
 		}
 
-		// Update allTextIsComment flag
-		allTextIsComment[lineIndex] = (nActualItems > 0 && !hasNonComment);
-
-		result += lineText;
 		if (nActualItems > 0 && blocks[nActualItems - 1].m_nColorIndex == COLORINDEX_COMMENT)
 		{
 			// If there is an inline comment, the EOL for that line will be deleted, so add the EOL.
 			int nLength = pTextBuffer->GetLineLength(nLine);
-			result += ucr::toUTF8(pszChars + nLength, nFullLength - nLength);
+			lineText += ucr::toUTF8(pszChars + nLength, nFullLength - nLength);
 		}
+
+		// Update allTextIsComment flag
+		allTextIsComment[lineIndex] = hasComment && !lineText.empty() && (lineText[0] == '\r' || lineText[0] == '\n');
+
+		result += lineText;
 	}
 
 	return result;

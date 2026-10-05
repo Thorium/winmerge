@@ -30,7 +30,9 @@ rep="norepeat"><option>/t</option>
 <replaceable>window-type</replaceable></arg> <arg><option>/x</option></arg>
 <arg><option>/xq</option></arg> <arg><option>/s</option></arg>
 <arg><option>/sw</option></arg> <arg><option>/s-</option></arg> <arg
-choice="opt" rep="norepeat"><option>/ul</option></arg> <arg choice="opt"
+choice="opt" rep="norepeat"><option>/g</option>
+<replaceable>group-name</replaceable></arg> <arg choice="opt"
+rep="norepeat"><option>/ul</option></arg> <arg choice="opt"
 rep="norepeat"><option>/um</option></arg> <arg choice="opt"
 rep="norepeat"><option>/ur</option></arg> <arg choice="opt"
 rep="norepeat"><option>/u</option></arg> <arg choice="opt"
@@ -239,6 +241,20 @@ keywords <userinput>Full</userinput>, <userinput>Quick</userinput>,
 
     <varlistentry>
       <indexterm>
+        <primary>חלון WinMerge</primary>
+        <secondary>instance groups</secondary>
+      </indexterm>
+
+      <term><option>/g</option> <replaceable>group-name</replaceable></term>
+      <listitem>
+        <para>Specifies a group name for the WinMerge instance. When used with the
+<option>/s</option> option, instances with the same group name share the
+same window, allowing you to organize multiple single-instance groups.</para>
+      </listitem>
+    </varlistentry>
+
+    <varlistentry>
+      <indexterm>
         <primary>רשימת MRU</primary>
       </indexterm>
 
@@ -412,23 +428,41 @@ WorkingCopy</userinput>. השתמש בסימני ציטוט סביב תיאור�
     </varlistentry>
 
     <varlistentry>
+      <indexterm>
+        <primary>3-way merge</primary>
+        <secondary>auto-merge with /al option</secondary>
+      </indexterm>
       <term><option>/al</option></term>
       <listitem>
-        <para>ממזג אוטומטית בצד שמאל בעת ההפעלה.</para>
+        <para>
+Auto-merges at startup with pane arrangement: left (merge target)  - middle
+(theirs) - right (base).</para>
       </listitem>
     </varlistentry>
 
     <varlistentry>
+      <indexterm>
+        <primary>3-way merge</primary>
+        <secondary>auto-merge with /am option</secondary>
+      </indexterm>
       <term><option>/am</option></term>
       <listitem>
-        <para>ממזג אוטומטית בצד האמצעי בעת ההפעלה.</para>
+        <para>
+Auto-merges at startup with pane arrangement: left (theirs)  - middle (merge
+target) - right (mine).</para>
       </listitem>
     </varlistentry>
 
     <varlistentry>
+      <indexterm>
+        <primary>3-way merge</primary>
+        <secondary>auto-merge with /ar option</secondary>
+      </indexterm>
       <term><option>/ar</option></term>
       <listitem>
-        <para>ממזג אוטומטית בצד ימין בעת ההפעלה.</para>
+        <para>
+Auto-merges at startup with pane arrangement: left (base)  - middle (theirs)
+- right (merge target).</para>
       </listitem>
     </varlistentry>
 
@@ -647,6 +681,12 @@ class="directory">C:\Folder2</filename> <emphasis>לא</emphasis> מכילה ק�
 <wordasword>התוצאה</wordasword>. אם אתה מציין נתיב פלט, WinMerge עדיין מציג
 רק שניים או שלושה קבצים בחלון השוואת הקבצים. עם זאת, אם אתה שומר אחד מהקבצים
 האלה, הוא נכתב לנתיב הפלט, ומשאיר את שניים או שלושת קבצי המקור ללא פגע.</para>
+
+        <para>In a three-way text comparison, specifying an output path also opens the
+Merge Result pane at the bottom of the File Compare window, where the merge
+result can be reviewed and edited before it is saved to the output path. See
+the Merge Result pane topic in <citetitle>Comparing and merging text
+files</citetitle>.</para>
 
         <para>מערכות בקרת גרסאות מתייחסות בדרך כלל לקבצי המקור והתוצאה באמצעות מונחים כמו
 <glossterm>שלהם</glossterm>, <glossterm>שלי</glossterm>,

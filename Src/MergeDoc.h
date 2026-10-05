@@ -21,12 +21,17 @@
 #include "FileLoadResult.h"
 #include "FileTransform.h"
 #include "LineFilterHelper.h"
+#include "MergeResultPane.h"
+#include "TableProps.h"
 #include <vector>
 #include <map>
 #include <memory>
 #include <optional>
 
 class CLineFilterHelperMenu;
+class CMainFrame;
+class CMergeResultTextBuffer;
+typedef CTypedPtrList<CPtrList, CMergeDoc*> MergeDocList;
 
 /**
  * @brief Additional action codes for WinMerge.
@@ -122,6 +127,7 @@ class CMergeEditFrame;
 class CEncodingErrorBar;
 class CLocationView;
 class CMergeEditSplitterView;
+class CMergeResultView;
 
 /**
  * @brief Document class for merging two files
@@ -129,10 +135,11 @@ class CMergeEditSplitterView;
 class CMergeDoc : public CDocument, public IMergeDoc, public IMDITab, public ILineDataProvider
 {
 public:
-	struct TableProps { bool istable; tchar_t delimiter; tchar_t quote; bool allowNewlinesInQuotes; };
 	// Attributes
 public:
 	static int m_nBuffersTemp;
+	static inline IMergeDoc::DocumentType m_documentTypeTemp;
+	IMergeDoc::DocumentType m_documentType;
 
 	// Begin declaration of CMergeDoc
 
@@ -208,6 +215,8 @@ public:
 	void SetPrediffer(const PrediffingInfo* infoPrediffer);
 	void GetPrediffer(PrediffingInfo* infoPrediffer) const;
 	const PrediffingInfo* GetPrediffer() const override;
+	void IgnoreColumnInComparison(int column, const String& panePrefix, bool add);
+	void ResetIgnoredColumnsInComparison();
 	const EditorScriptInfo* GetEditorScript() const override { return &m_editorScriptInfo; };
 	CTreeSitterParser* GetTreeSitterParser(int nBuffer);
 	bool IsTreeSitterEnabled() const;
@@ -300,6 +309,7 @@ public:
 	std::string GetLine(int pane, int lineIndex) const override;
 	int GetColumnCount(int pane, int lineIndex) const override;
 	std::string GetColumn(int pane, int lineIndex, int columnIndex) const override;
+	std::string GetColumns(int pane, int lineIndex, const std::vector<int>& columns) const override;
 	int GetRealLineNumber(int pane, int lineIndex) const override;
 	unsigned GetLineFlags(int pane, int lineIndex) const override;
 	unsigned GetLineEol(int pane, int lineIndex) const override;
@@ -337,13 +347,87 @@ public:
 	bool DoFileEncodingDialog(int pane = -1);
 // End MergeDocEncoding.cpp
 
+// Implementation in MergeDocResultPane.cpp (kdiff3-style merge result pane)
+public:
+	CMergeResultView* GetMergeResultView() const { return m_pMergeResultView; }
+	void SetMergeResultView(CMergeResultView* pView) { m_pMergeResultView = pView; }
+	CMergeResultTextBuffer* GetMergeResultBuffer() const { return m_ptResultBuf.get(); }
+	bool IsMergeResultPaneVisible() const;
+	int GetMergeBasePane() const { return m_nMergeBasePane; }
+	bool StartMergeSession(int nBasePane, bool bAutoMerge, bool bWithMessage);
+	bool EndMergeSession();
+	bool GetMergeResultBuildState() const { return m_bResultBuilt; }
+	void UpdateMergePaneHeaders(int nBasePane);
+	void BuildMergeResult();
+	void ApplyAutoMergeToResult();
+	bool IsMergeResultModified() const;
+	/** @brief Result content that has not been written to the output yet */
+	bool IsMergeResultUnsaved() const;
+	int GetResultUnresolvedCount() const;
+	void GetResultUnresolvedCounts(int& nUnresolved, int& nConflicts, int& nWhiteSpaceOnly) const;
+	String GetResultConflictBlockText(int nDiff, bool bWhiteSpaceOnly, int* pnLines) const;
+	static String GetResultPlaceholderText(ResultSegmentState state, bool bWhiteSpaceOnly);
+	String GetResultSegmentDisplayText(const MergeResultSegment& seg, int* pnLines) const;
+	/** @brief Difference still waiting for a decision in the result pane? */
+	bool IsResultDiffPending(int nDiff) const;
+	/** @brief Is the line an unresolved-difference placeholder (not editable)? */
+	bool IsResultPlaceholderLine(int nLine) const;
+	/** @brief Would deleting the given range destroy a placeholder line? */
+	bool IsResultDeleteTouchingPlaceholder(int nStartLine, int nStartPos,
+		int nEndLine, int nEndPos) const;
+	/** @brief Margin provenance marker for a result line ('1'..'3', 'm', '?'), 0 for none */
+	tchar_t GetResultLineMarker(int nLine) const;
+	const MergeResultSegment* GetResultSegmentByLine(int nLine) const;
+	const MergeResultSegment* GetResultSegmentByDiff(int nDiff) const;
+
+	void ResultChooseSource(int nDiff, int srcPane, bool bGroupWithPrevious = false);
+	void ResultChooseSources(int nDiff, const std::vector<int>& srcPanes, bool bGroupWithPrevious = false);
+	void ResultToggleSource(int nDiff, int srcPane, bool bGroupWithPrevious = false);
+	void ResultChooseAllConflicts(int srcPane);
+	bool SaveMergeResult(bool bSaveAs);
+	void OnResultPaneCurrentDiffChanged(int nDiff);
+	// called from CMergeResultTextBuffer on user edits
+	void OnResultBufferInsertedLines(int nLine, int nCount);
+	void OnResultBufferDeletedLines(int nStartLine, int nCount);
+	void OnResultBufferDeletedWholeLines(int nFirstLine, int nCount);
+	void OnResultLineEdited(int nLine);
+	// segment table snapshots kept in sync with the buffer's undo stack
+	void OnResultUndoGroupStart(int nUndoPos);
+	void OnResultUndone(int nUndoPos);
+	void OnResultRedone(int nUndoPos);
+	void OnResultUndoStackCleared();
+private:
+	String GetPaneApparentLinesText(int nPane, int nApparentBegin, int nApparentEnd, int* pnLines) const;
+	int GetResultSegmentIndexByLine(int nLine) const;
+	bool IsResultDiffWhiteSpaceOnly(const DIFFRANGE* pdi) const;
+	CRLFSTYLE PickResultCRLFStyle() const;
+	void PickResultEncoding();
+	String GetResultBufferLinesText(int nStartLine, int nLines) const;
+	String BuildExpandedResultText() const;
+	bool AdjustResultSegmentsAfterLineDeletion(int nRemovedBegin, int nCount);
+	void EnsureNoLinesPlaceholder(int nSegment);
+	std::unique_ptr<CMergeResultTextBuffer> m_ptResultBuf; /**< Merge result buffer (not part of the diff) */
+	CMergeResultView* m_pMergeResultView; /**< Merge result view, or nullptr */
+	std::vector<MergeResultSegment> m_resultSegments; /**< Segments covering the result buffer */
+	std::vector<int> m_resultDiffToSegment; /**< diff index -> segment index or -1 */
+	std::map<int, std::vector<MergeResultSegment>> m_resultSegUndo; /**< table before undo group (key: group start) */
+	std::map<int, std::vector<MergeResultSegment>> m_resultSegRedo; /**< table after undo group (key: group start) */
+	bool m_bResultBuilt; /**< Result buffer has been generated */
+	bool m_bResultSaved; /**< Result has been written to the output since it was built */
+	int  m_nMergeBasePane; /**< Pane to use as the base for auto-merging */
+	bool m_bResultSavedRO[3]; /**< Read-only states before the result pane forced them */
+	String m_strResultSavedDesc[3]; /**< Pane descriptions before the result pane added merge labels */
+	BUFFERTYPE m_nResultSavedBufferType[3]; /**< Buffer types before the result pane forced them */
+	std::optional<DIFFOPTIONS> m_mergeSessionDiffOptions;
+// End MergeDocResultPane.cpp
+
 // Implementation
 public:
 	FileChange IsFileChangedOnDisk(const tchar_t* szPath, DiffFileInfo &dfi,
 		bool bSave, int nBuffer);
 	bool PromptAndSaveIfNeeded(bool bAllowCancel);
 	std::vector<int> undoTgt;
-	std::vector<int>::iterator curUndo;
+	size_t curUndo;
 	void FlushAndRescan(bool bForced = false);
 	void SetCurrentDiff(int nDiff);
 	int GetCurrentDiff() const { return m_nCurDiff; }
@@ -355,7 +439,8 @@ public:
 	virtual ~CMergeDoc();
 	void SetDetectMovedBlocks(bool bDetectMovedBlocks);
 	bool IsMixedEOL(int nBuffer) const;
-	bool GenerateReport(const String& sFileName) const override;
+	bool GenerateReport(ReportContext& reportContext) const override;
+	IMergeDoc::DocumentType GetDocumentType() const override { return m_documentType; }
 	void SetAutoMerged(bool bAutoMerged) { m_bAutoMerged = bAutoMerged; }
 	bool GetAutoMerged() const { return m_bAutoMerged; };
 	bool IsModified() const
@@ -376,17 +461,19 @@ public:
 	std::optional<bool> GetEnableTableEditing() const { return m_bEnableTableEditing; }
 	void SetEnableTableEditing(std::optional<bool> bEnableTableEditing) { m_bEnableTableEditing = bEnableTableEditing; }
 	static TableProps MakeTablePropertiesByFileName(const String& path, const std::optional<bool>& enableTableEditing, bool showDialog = true);
+	const TableProps* GetPreparedTableProperties() const { return m_pTablePropsPrepared.get(); }
 	void SetPreparedTableProperties(const TableProps& props) { m_pTablePropsPrepared.reset(new TableProps(props)); }
+	TableProps GetCurrentTableProperties(int pane) const;
 
 	void SetTextType(int textType);
 	void SetTextType(const String& ext);
 	bool GetChangedSchemeManually() const { return m_bChangedSchemeManually; }
 
 	bool GetAutomaticRescan() const { return m_bAutomaticRescan; }
-	// to customize the mergeview menu
-	HMENU createPrediffersSubmenu(HMENU hMenu);
 	const String& GetSaveAsPath() const { return m_strSaveAsPath; }
 	void SetSaveAsPath(const String& strSaveAsPath) { m_strSaveAsPath = strSaveAsPath; }
+	const String& GetMergeResultSavePath() const { return m_strMergeResultSavePath; }
+	void SetMergeResultSavePath(const String& strSaveAsPath) { m_strMergeResultSavePath = strSaveAsPath; }
 
 // implementation methods
 private:
@@ -415,6 +502,7 @@ protected:
 	bool m_bEditAfterRescan[3]; /**< Left/middle/right doc edited after rescanning */
 	TempFile m_tempFiles[3]; /**< Temp files for compared files */
 	String m_strSaveAsPath; /**< "3rd path" where output saved if given */
+	String m_strMergeResultSavePath; /**< Save path for the merge result pane */
 	int m_nDiffContext;
 	bool m_bInvertDiffContext;
 	bool m_bMixedEol; /**< Does this document have mixed EOL style? */
@@ -432,8 +520,6 @@ protected:
 	 */
 	bool m_bAutomaticRescan;
 	/// active prediffer ID : helper to check the radio button
-	int m_CurrentPredifferID;
-	int m_CurrentEditorScriptID;
 	bool m_bChangedSchemeManually;	/**< `true` if the syntax highlighting scheme is changed manually */
 	String m_sCurrentHeaderTitle[3];
 	EditorScriptInfo m_editorScriptInfo;
@@ -470,23 +556,35 @@ protected:
 	afx_msg void OnUpdateStatusRO(CCmdUI* pCmdUI);
 	afx_msg void OnDiffContext(UINT nID);
 	afx_msg void OnUpdateDiffContext(CCmdUI* pCmdUI);
-	afx_msg void OnToolsGenerateReport();
-	afx_msg void OnToolsGeneratePatch();
 	afx_msg void OnOpenWithUnpacker();
 	afx_msg void OnApplyPrediffer();
+	afx_msg void OnUpdateApplyPrediffer(CCmdUI* pCmdUI);
 	afx_msg void OnBnClickedFileEncoding();
 	afx_msg void OnBnClickedPlugin();
 	afx_msg void OnBnClickedHexView();
+	afx_msg void OnMergeChooseSource(UINT nID);
+	afx_msg void OnUpdateMergeChooseSource(CCmdUI* pCmdUI);
+	afx_msg void OnMergeChooseAllConflicts(UINT nID);
+	afx_msg void OnUpdateMergeChooseAllConflicts(CCmdUI* pCmdUI);
+	afx_msg void OnMergeResultSave();
+	afx_msg void OnMergeResultSaveAs();
+	afx_msg void OnUpdateMergeResultSave(CCmdUI* pCmdUI);
+	afx_msg void OnMergeStartSession();
+	afx_msg void OnUpdateMergeStartSession(CCmdUI* pCmdUI);
+	afx_msg void OnMergeEndSession();
+	afx_msg void OnUpdateMergeEndSession(CCmdUI* pCmdUI);
 	afx_msg void OnOK();
 	afx_msg void OnFileRecompareAsText();
 	afx_msg void OnFileRecompareAsTable();
 	afx_msg void OnUpdateFileRecompareAsText(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateFileRecompareAsTable(CCmdUI* pCmdUI);
 	afx_msg void OnFileRecompareAs(UINT nID);
+	afx_msg void OnUpdateFileRecompareAs(CCmdUI* pCmdUI);
 	template<int srcPane, int dstPane>
 	afx_msg void OnViewSwapPanes();
 	afx_msg void OnUpdateSwapContext(CCmdUI* pCmdUI);
 	afx_msg void OnRefresh();
+	afx_msg void OnUpdateRefresh(CCmdUI* pCmdUI);
 	afx_msg void OnUpdatePrediffer(CCmdUI* pCmdUI);
 	afx_msg void OnPrediffer(UINT nID);
 	afx_msg void OnScriptsForCopying(UINT nID);
@@ -513,7 +611,7 @@ private:
 	void FlagMovedLines();
 	String GetFileExt(const tchar_t* sFileName, const tchar_t* sDescription) const;
 	void DoFileSave(int pane);
-	void SetPredifferByMenu(UINT nID);
+	String GetMergePaneRoles() const;
 };
 
 /**
@@ -523,4 +621,3 @@ inline bool CMergeDoc::HasSyncPoints()
 {
 	return m_bHasSyncPoints;
 }
-

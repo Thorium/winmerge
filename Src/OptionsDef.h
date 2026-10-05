@@ -39,9 +39,10 @@ inline const String OPT_SHOW_OUTPUTBAR {_T("Settings/ShowOutputbar"s)};
 inline const String OPT_REBAR_STATE {_T("Settings/ReBarState"s)};
 inline const String OPT_TOOLBAR_SIZE {_T("Settings/ToolbarSize"s)};
 inline const String OPT_RESIZE_PANES {_T("Settings/AutoResizePanes"s)};
+inline const String OPT_MDI_BUTTON_VISIBILITY {_T("Settings/MDIButtonVisibility"s)};
 
 inline const String OPT_SYNTAX_HIGHLIGHT {_T("Settings/HiliteSyntax"s)};
-inline const String OPT_TREE_SITTER_MODE {_T("Settings/TreeSitterMode"s)};
+inline const String OPT_SYNTAX_HIGHLIGHT_MODE {_T("Settings/HiliteSyntaxMode"s)};
 inline const String OPT_TREE_SITTER_OCCURRENCE_HIGHLIGHT {_T("Settings/TreeSitterOccurrenceHighlight"s)};
 inline const String OPT_TREE_SITTER_BREADCRUMB {_T("Settings/TreeSitterBreadcrumb"s)};
 inline const String OPT_SEMANTIC_MERGE_EXPERIMENTAL {_T("Settings/SemanticMergeExperimental"s)};
@@ -82,10 +83,18 @@ inline const String OPT_ACTIVE_FRAME_MAX {_T("Settings/ActiveFrameMax"s)};
 inline const String OPT_ACTIVE_PANE {_T("Settings/ActivePane"s)};
 inline const String OPT_LOCBAR_MOVECURSOR_ONCLICK {_T("Settings/LocBarMoveCursorOnClick"s)};
 
-// Folder Compare Report
+// Folder/File Compare Report
 inline const String OPT_REPORTFILES_REPORTTYPE {_T("ReportFiles/ReportType"s)};
 inline const String OPT_REPORTFILES_COPYTOCLIPBOARD {_T("ReportFiles/CopyToClipboard"s)};
+inline const String OPT_REPORTFILES_OPENREPORTFILE {_T("ReportFiles/OpenReportFile"s)};
 inline const String OPT_REPORTFILES_INCLUDEFILECMPREPORT {_T("ReportFiles/IncludeFileCmpReport"s)};
+inline const String OPT_REPORTFILES_INCLUDEALLIMAGEPAGES {_T("ReportFiles/IncludeAllImagePages"s)};
+
+// archive
+inline const String OPT_ARCHIVE_INCLUDEREPORT {_T("Archives/IncludeReport"s)};
+inline const String OPT_ARCHIVE_INCLUDEPATCH {_T("Archives/IncludePatch"s)};
+inline const String OPT_ARCHIVE_INCLUDEPROJECT {_T("Archives/IncludeProject"s)};
+inline const String OPT_ARCHIVE_COPYTOCLIPBOARD {_T("Archives/CopyToClipboard"s)};
 
 // File compare
 inline const String OPT_AUTOMATIC_RESCAN {_T("Settings/AutomaticRescan"s)};
@@ -269,6 +278,11 @@ inline const String OPT_CMP_IMG_OVERLAYANIMATIONINTERVAL {_T("Settings/ImageOver
 
 inline const String OPT_CMP_ENABLE_IMGCMP_IN_DIRCMP {_T("Settings/EnableImageCompareInFolderCompare"s)};
 inline const String OPT_CMP_IMG_OCR_RESULT_TYPE {_T("Settings/ImageOcrResultType"s)};
+inline const String OPT_CMP_IMG_PREFER_WIC_DECODER {_T("Settings/ImagePreferWICDecoder"s)};
+inline const String OPT_CMP_IMG_SPLITTER_RATIOS {_T("Settings/ImageSplitterRatios"s)};
+
+// Text file Compare options
+inline const String OPT_CMP_TEXT_SPLITTER_RATIOS {_T("Settings/TextSplitterRatios"s)};
 
 // WebPage Compare options
 inline const String OPT_CMP_WEB_USERDATAFOLDER_TYPE {_T("Settings/WebPageUserDataFolderType"s)};
@@ -278,6 +292,7 @@ inline const String OPT_CMP_WEB_SHOWDIFFERENCES {_T("Settings/WebPageShowDiffere
 inline const String OPT_CMP_WEB_VIEW_WIDTH {_T("Settings/WebPageViewWidth"s)};
 inline const String OPT_CMP_WEB_VIEW_HEIGHT {_T("Settings/WebPageViewHeight"s)};
 inline const String OPT_CMP_WEB_ZOOM {_T("Settings/WebZoom"s)};
+inline const String OPT_CMP_WEB_SPLITTER_RATIOS {_T("Settings/WebPageSplitterRatios"s)};
 inline const String OPT_CMP_WEB_USER_AGENT {_T("Settings/WebUserAgent"s)};
 inline const String OPT_CMP_WEB_SYNC_EVENTS {_T("Settings/WebSyncEvents"s)};
 inline const String OPT_CMP_WEB_SYNC_EVENT_FLAGS {_T("Settings/WebSyncEventFlags"s)};
@@ -286,6 +301,7 @@ inline const String OPT_CMP_WEB_URL_PATTERN_TO_EXCLUDE {_T("Settings/WebPageURLP
 
 // Binary options
 inline const String OPT_CMP_BIN_FILEPATTERNS {_T("Settings/BinaryFilePatterns"s)};
+inline const String OPT_CMP_BIN_SPLITTER_RATIOS {_T("Settings/BinarySplitterRatios"s)};
 
 // Table options
 inline const String OPT_CMP_CSV_FILEPATTERNS {_T("Settings/CSVFilePatterns"s)};
@@ -295,6 +311,7 @@ inline const String OPT_CMP_DSV_FILEPATTERNS {_T("Settings/DSVFilePatterns"s)};
 inline const String OPT_CMP_DSV_DELIM_CHAR   {_T("Settings/DSVDelimiterCharacter"s)};
 inline const String OPT_CMP_TBL_ALLOW_NEWLINES_IN_QUOTES {_T("Settings/TableAllowNewlinesInQuotes"s)};
 inline const String OPT_CMP_TBL_QUOTE_CHAR   {_T("Settings/TableQuoteCharacter"s)};
+inline const String OPT_CMP_TBL_SPLITTER_RATIOS {_T("Settings/TableSplitterRatios"s)};
 
 /// Are regular expression linefilters enabled?
 inline const String OPT_LINEFILTER_ENABLED {_T("Settings/IgnoreRegExp"s)};
@@ -303,6 +320,9 @@ inline const String OPT_FILEFILTER_CURRENT {_T("Settings/FileFilterCurrent"s)};
 inline const String OPT_FILTER_USERPATH {_T("Settings/UserFilterPath"s)};
 inline const String OPT_FILEFILTER_SHARED {_T("Settings/Filters/Shared"s)};
 inline const String OPT_USERDATA_LOCATION {_T("Settings/UserDataLocation"s)};
+
+// Merge Result Pane
+inline const String OPT_MERGE_RESULT_PANE_ENABLED {_T("Settings/MergeResultPaneEnabled"s)};
 
 /// Substitution Filters
 inline const String OPT_SUBSTITUTION_FILTERS_ENABLED {_T("Settings/SubstitutionFiltersEnabled"s)};

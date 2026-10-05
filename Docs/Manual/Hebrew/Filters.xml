@@ -2451,13 +2451,26 @@ current line.  Supports side-specific prefix functions.  Example:
           </varlistentry>
           <varlistentry>
             <term><function>Column</function>(<replaceable>indexOrName</replaceable>),
+<function>ColumnRange</function>(<replaceable>specification</replaceable>),
 <function>ColumnAt</function>(<replaceable>line</replaceable>,
 <replaceable>indexOrName</replaceable>),
 <function>ColumnOffsetAt</function>(<replaceable>offset</replaceable>,
 <replaceable>indexOrName</replaceable>)  (table mode only)</term>
-            <listitem><para>Cell content by index or name, at the current, absolute, or relative line.
-Example: <literal>le:RightColumn("Category") != ColumnOffsetAt(-1,
-"Category")</literal></para></listitem>
+            <listitem><para>Cell content by index or name, at the current, absolute, or relative
+line. For <function>Column</function>, a numeric string is always treated as
+a column name. A numeric argument is a 1-based column index. Use
+<function>ColumnRange</function> to specify multiple columns and ranges
+using comma-separated <literal>N</literal>, <literal>N-M</literal>, and
+<literal>N-</literal> items; whitespace is ignored, for example
+<literal>ColumnRange("1, 3, 5-10, 13-")</literal>.  Prefix a range with
+<literal>!</literal> to exclude it; for example
+<literal>ColumnRange("!1")</literal> excludes column 1 and
+<literal>ColumnRange("1-10,!4-5")</literal> selects columns 1-10 except
+columns 4-5. If no included range is specified, all columns are included
+before exclusions are applied.  Existing name and single-index forms return
+one cell; range forms return the selected cell values joined using the table
+delimiter.  Example: <literal>le:RightColumn("Category") !=
+ColumnOffsetAt(-1, "Category")</literal></para></listitem>
           </varlistentry>
         </variablelist>
       </section>
@@ -2721,6 +2734,26 @@ items</para></listitem>
       <listitem><para><userinput>e:Date &gt; today() - 7days</userinput> - shows items modified
 within the last week</para></listitem>
     </itemizedlist>
+  </section>
+
+  <section id="Filters_LineFilterPluginPipeline">
+    <title>Using filter expressions in plugin pipelines</title>
+
+    <para>Starting with version 2.16.59, filter expressions can be used as items in
+plugin pipelines by prefixing them with <literal>le:</literal>. For example:</para>
+
+    <synopsis>le:toUpper(Line)|SortAscending</synopsis>
+
+    <para>See <xref linkend="FilterExpression_Syntax" /> for available filter
+expression functions and operators.</para>
+
+    <para>When filter expressions are used in plugin pipelines, they operate on a
+single line at a time (a scalar value), which differs from display line
+filters.  In display line filters, attributes like <literal>Line</literal>
+represent pairs of values (left and right sides being compared), typically
+expressed as arrays like <literal>[Left, Right]</literal>. In plugin
+pipelines, the same attributes like <literal>Line</literal> are scalar
+values representing the current line being processed.</para>
   </section>
 
   <section id="Filters_SubstitutionFilter">

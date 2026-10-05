@@ -127,9 +127,9 @@ AddUndoRecord(bool bInsert, const CEPoint & ptStartPos,
 		cchText, nActionType, paSavedRevisionNumbers);
 	if (m_aUndoBuf[m_nUndoPosition - 1].m_dwFlags & UNDO_BEGINGROUP)
 	{
-		m_pOwnerDoc->undoTgt.erase(m_pOwnerDoc->curUndo, m_pOwnerDoc->undoTgt.end());
+		m_pOwnerDoc->undoTgt.erase(m_pOwnerDoc->undoTgt.begin() + m_pOwnerDoc->curUndo, m_pOwnerDoc->undoTgt.end());
 		m_pOwnerDoc->undoTgt.push_back(m_nThisPane);
-		m_pOwnerDoc->curUndo = m_pOwnerDoc->undoTgt.end();
+		m_pOwnerDoc->curUndo = m_pOwnerDoc->undoTgt.size();
 	}
 }
 
@@ -159,7 +159,7 @@ void CDiffTextBuffer::prepareForRescan()
 	for (int ct = GetLineCount() - 1; ct >= 0; --ct)
 	{
 		SetLineFlag(ct, 
-			LF_INVISIBLE | LF_DIFF | LF_TRIVIAL | LF_MOVED | LF_SNP,
+			LF_INVISIBLE | LF_DIFF | LF_TRIVIAL | LF_MOVED | LF_SNP | LF_DIFF_1STONLY | LF_DIFF_2NDONLY | LF_DIFF_3RDONLY,
 			false, false, false);
 	}
 }
@@ -179,6 +179,9 @@ OnNotifyLineHasBeenEdited(int nLine)
 	SetLineFlag(nLine, LF_TRIVIAL, false, false, false);
 	SetLineFlag(nLine, LF_MOVED, false, false, false);
 	SetLineFlag(nLine, LF_SNP, false, false, false);
+	SetLineFlag(nLine, LF_DIFF_1STONLY, false, false, false);
+	SetLineFlag(nLine, LF_DIFF_2NDONLY, false, false, false);
+	SetLineFlag(nLine, LF_DIFF_3RDONLY, false, false, false);
 	CGhostTextBuffer::OnNotifyLineHasBeenEdited(nLine);
 }
 
@@ -208,7 +211,12 @@ int CDiffTextBuffer::LoadFromFile(const tchar_t* pszFileNameInit,
 
 	// Unpacking the file here, save the result in a temporary file
 	m_strTempFileName = pszFileNameInit;
-	if (!infoUnpacker.Unpacking(m_nThisPane, &m_unpackerSubcodes, m_strTempFileName, sToFindUnpacker, { m_strTempFileName }))
+	PluginPipelineContext pipelineContext;
+	pipelineContext.filteredFilenames = sToFindUnpacker;
+	pipelineContext.variables = { m_strTempFileName };
+	if (m_pOwnerDoc->GetPreparedTableProperties())
+		pipelineContext.tableProps = *m_pOwnerDoc->GetPreparedTableProperties();
+	if (!infoUnpacker.Unpacking(m_nThisPane, &m_unpackerSubcodes, m_strTempFileName, pipelineContext))
 	{
 		InitNew(); // leave crystal editor in valid, empty state
 		return FileLoadResult::FRESULT_ERROR_UNPACK;
@@ -519,7 +527,10 @@ int CDiffTextBuffer::SaveToFile (const String& pszFileName,
 		// If we are saving user files
 		// we need an unpacker/packer, at least a "do nothing" one
 		// repack the file here, overwrite the temporary file we did save in
-		bSaveSuccess = infoUnpacker.Packing(m_nThisPane, sIntermediateFilename, pszFileName, m_unpackerSubcodes, { pszFileName });
+		PluginPipelineContext pipelineContext;
+		pipelineContext.variables = { pszFileName };
+		pipelineContext.tableProps = m_pOwnerDoc->GetCurrentTableProperties(m_nThisPane);
+		bSaveSuccess = infoUnpacker.Packing(m_nThisPane, sIntermediateFilename, pszFileName, m_unpackerSubcodes, pipelineContext);
 		if (!bSaveSuccess)
 			sError = GetSysError();
 		try

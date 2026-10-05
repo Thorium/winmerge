@@ -821,6 +821,7 @@ bool Analyzer::TryBuildInsertionSuggestion(int dstPane, const DiffInfo& diff, Su
 	suggestion.defs[addedPane].pane = addedPane;
 	suggestion.defs[addedPane].tag = addedTag;
 	suggestion.defs[addedPane].text = addedText;
+	suggestion.insertedDefs.push_back(suggestion.defs[addedPane]);
 	suggestion.defs[dstPane].pane = dstPane;
 	suggestion.displayName = ucr::toTString(addedTag.name);
 	suggestion.insertOnly = true;
@@ -1314,10 +1315,12 @@ bool Analyzer::TryCollectIndependentAdditionSuggestions(int dstPane, std::vector
 		bool beforeNext = true;
 		std::vector<String> names;
 		std::vector<String> texts;
+		std::vector<DefinitionInfo> defs;
 	};
 
 	std::unordered_map<String, AdditionGroup> groups;
 	std::unordered_map<std::string, String> seenMissingTexts;
+	std::unordered_map<std::string, String> seenGroupKeys;
 
 	auto collectFromSourcePane = [&](int srcPane, const auto& uniqueSourceTags) -> bool
 	{
@@ -1341,6 +1344,10 @@ bool Analyzer::TryCollectIndependentAdditionSuggestions(int dstPane, std::vector
 					message = _("Both changed panes add a definition with the same name but different contents, so no safe semantic copy suggestion is available.");
 					return false;
 				}
+				// the same definition added by the other pane as well
+				auto keyIt = seenGroupKeys.find(tag.name);
+				if (keyIt != seenGroupKeys.end())
+					groups[keyIt->second].defs.push_back(DefinitionInfo{ tag, srcPane, addedText });
 				continue;
 			}
 
@@ -1395,6 +1402,8 @@ bool Analyzer::TryCollectIndependentAdditionSuggestions(int dstPane, std::vector
 			}
 			group.names.push_back(ucr::toTString(tag.name));
 			group.texts.push_back(addedText);
+			group.defs.push_back(DefinitionInfo{ tag, srcPane, addedText });
+			seenGroupKeys[tag.name] = groupKey;
 			seenMissingTexts[tag.name] = addedText;
 		}
 		return true;
@@ -1426,6 +1435,7 @@ bool Analyzer::TryCollectIndependentAdditionSuggestions(int dstPane, std::vector
 		suggestion.displayName = group.names.size() == 1 ? group.names[0] : _("added definitions");
 		suggestion.replacementText = combinedText;
 		suggestion.previewText = combinedText;
+		suggestion.insertedDefs = group.defs;
 		suggestions.push_back(suggestion);
 	}
 

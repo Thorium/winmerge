@@ -136,7 +136,10 @@ bool CheckSemanticMergePreconditions(const CMergeDoc& doc, int dstPane, String& 
 		return false;
 	}
 
-	if (dstPane < 0 || dstPane >= doc.m_nBuffers || doc.GetReadOnly(dstPane))
+	// During a merge session the compared panes are read-only and the
+	// copy goes to the merge result instead
+	if (dstPane < 0 || dstPane >= doc.m_nBuffers ||
+		(doc.GetReadOnly(dstPane) && !doc.IsSemanticMergeToResult(dstPane)))
 	{
 		message = _("The destination pane is read-only.");
 		return false;
@@ -348,6 +351,23 @@ String CMergeDoc::GetSemanticPreviewFileExt(int pane) const
 bool CMergeDoc::DoSemanticMergeSuggestion(int dstPane, int nDiff, String& message,
 	int anchorPane /*= -1*/, int anchorLine /*= -1*/, bool allowAdoptAgreed /*= false*/)
 {
+	if (IsSemanticMergeToResult(dstPane))
+	{
+		// Adopting the version the other panes agree on is only a merge
+		// when the destination is the base they both changed
+		SemanticMerge::Suggestion suggestion;
+		if (!TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message, anchorPane, anchorLine,
+			allowAdoptAgreed && dstPane == m_nMergeBasePane))
+			return false;
+		bool bGroupWithPrevious = false;
+		if (!ApplySemanticSuggestionToResult(dstPane, suggestion, true, bGroupWithPrevious, message))
+			return false;
+		message = strutils::format_string1(
+			_("Applied safe semantic copy for definition '%1' to the merge result."),
+			suggestion.displayName);
+		return true;
+	}
+
 	SemanticMerge::Suggestion suggestion;
 	if (!TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message, anchorPane, anchorLine, allowAdoptAgreed))
 		return false;
@@ -372,6 +392,34 @@ bool CMergeDoc::DoSemanticMergeSuggestion(int dstPane, int nDiff, String& messag
 		_("Applied semantic merge suggestion for definition '%1'."),
 		suggestion.displayName);
 	return true;
+}
+
+/**
+ * @brief Try safe semantic copy on every conflict that is still
+ * unresolved in the merge result.
+ * @return Number of conflicts resolved.
+ */
+int CMergeDoc::DoSemanticMergeConflictsToResult()
+{
+	const int dstPane = GetMergeDestPane();
+	if (!IsSemanticMergeToResult(dstPane) || !IsSemanticMergeEnabled())
+		return 0;
+
+	int nApplied = 0;
+	bool bGroupWithPrevious = false;
+	for (int nDiff = 0; nDiff < m_diffList.GetSize(); ++nDiff)
+	{
+		const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
+		if (pdi == nullptr || pdi->op != OP_DIFF || !m_diffList.IsDiffSignificant(nDiff) ||
+			!IsResultDiffPending(nDiff))
+			continue;
+		SemanticMerge::Suggestion suggestion;
+		String message;
+		if (TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message) &&
+			ApplySemanticSuggestionToResult(dstPane, suggestion, false, bGroupWithPrevious, message))
+			++nApplied;
+	}
+	return nApplied;
 }
 
 bool CMergeDoc::FindFirstSemanticMergeSuggestion(int dstPane, int& nDiff, String& message,
@@ -458,6 +506,31 @@ bool CMergeDoc::DoAllSemanticMergeSuggestions(int dstPane, String& message)
 	std::vector<SemanticMerge::Suggestion> suggestions;
 	if (!TryCollectSemanticSuggestions(*this, dstPane, suggestions, message))
 		return false;
+
+	if (IsSemanticMergeToResult(dstPane))
+	{
+		int nApplied = 0;
+		bool bGroupWithPrevious = false;
+		String reason;
+		for (const auto& suggestion : suggestions)
+		{
+			String suggestionMessage;
+			if (ApplySemanticSuggestionToResult(dstPane, suggestion, false, bGroupWithPrevious, suggestionMessage))
+				++nApplied;
+			else if (reason.empty())
+				reason = suggestionMessage;
+		}
+		if (nApplied == 0)
+		{
+			message = !reason.empty() ? reason :
+				_("No safe semantic copy suggestion is available for the merge result.");
+			return false;
+		}
+		message = strutils::format_string1(
+			_("Applied %1 safe semantic copy suggestions to the merge result."),
+			strutils::to_str(nApplied));
+		return true;
+	}
 
 	const bool bOldEnableRescan = m_bEnableRescan;
 	m_bEnableRescan = false;
@@ -2524,6 +2597,14 @@ bool CMergeDoc::PromptAndSaveIfNeeded(bool bAllowCancel)
 	// prompt is also shown when the pane is hidden but the result was
 	// modified by the user.
 	if (m_ptResultBuf != nullptr && m_ptResultBuf->IsInitialized() &&
+		(m_bResultBuilt || IsMergeResultModified()) && theApp.GetNonInteractive())
+	{
+		// An unattended run has nobody to ask: write what it merged to
+		// the output path it was given
+		if (!m_strMergeResultSavePath.empty() && IsMergeResultModified() && !SaveMergeResult(false))
+			return false;
+	}
+	else if (m_ptResultBuf != nullptr && m_ptResultBuf->IsInitialized() &&
 		(m_bResultBuilt || IsMergeResultModified()))
 	{
 		const int nUnresolved = GetResultUnresolvedCount();

@@ -19,6 +19,7 @@
 #include "MergeDoc.h"
 #include "MainFrm.h"
 #include "MergeLogger.h"
+#include "Logger.h"
 #include "OptionsMgr.h"
 #include "OptionsDiffColors.h"
 #include "WMGotoDlg.h"
@@ -2115,7 +2116,10 @@ void CMergeEditView::OnUpdateAutoMerge(CCmdUI* pCmdUI)
 
 		int nUnresolved = 0, nConflicts = 0, nWhiteSpaceOnly = 0;
 		pDoc->GetResultUnresolvedCounts(nUnresolved, nConflicts, nWhiteSpaceOnly);
-		pCmdUI->Enable(nUnresolved - nConflicts > 0);
+		// conflicts are worth a try only with the semantic fallback
+		const bool bSemanticFallback = pDoc->IsSemanticMergeEnabled() &&
+			GetOptionsMgr()->GetBool(OPT_AUTO_MERGE_SEMANTIC_FALLBACK);
+		pCmdUI->Enable(nUnresolved - (bSemanticFallback ? 0 : nConflicts) > 0);
 		return;
 	}
 	pCmdUI->Enable(pDoc->m_nBuffers == 3 && 
@@ -2126,6 +2130,9 @@ void CMergeEditView::OnUpdateAutoMerge(CCmdUI* pCmdUI)
 
 void CMergeEditView::OnSemanticMerge()
 {
+	if (SemanticMergeToResult(m_nThisPane, false))
+		return;
+
 	CMergeDoc* pDoc = GetDocument();
 	if (!CanSemanticMergeToPane(m_nThisPane))
 	{
@@ -2175,6 +2182,12 @@ void CMergeEditView::OnSemanticMerge()
 
 void CMergeEditView::OnUpdateSemanticMerge(CCmdUI* pCmdUI)
 {
+	if (UsesMergeResultForSemanticMerge() && GetDocument()->GetMergeResultBuildState())
+	{
+		pCmdUI->SetText(_T("Safe Semantic Copy to Merge Result\tCtrl+Alt+Shift+M"));
+		pCmdUI->Enable(GetDocument()->IsSemanticMergeEnabled());
+		return;
+	}
 	if (GetDocument()->m_nBuffers == 3)
 	{
 		static const TCHAR* paneNames[] = { _T("Left"), _T("Middle"), _T("Right") };
@@ -2186,6 +2199,9 @@ void CMergeEditView::OnUpdateSemanticMerge(CCmdUI* pCmdUI)
 
 void CMergeEditView::OnSemanticMergeAll()
 {
+	if (SemanticMergeToResult(m_nThisPane, true))
+		return;
+
 	CMergeDoc* pDoc = GetDocument();
 	if (!CanSemanticMergeAllToPane(m_nThisPane))
 	{
@@ -2219,6 +2235,12 @@ void CMergeEditView::OnSemanticMergeAll()
 
 void CMergeEditView::OnUpdateSemanticMergeAll(CCmdUI* pCmdUI)
 {
+	if (UsesMergeResultForSemanticMerge() && GetDocument()->GetMergeResultBuildState())
+	{
+		pCmdUI->SetText(_T("Safe Semantic Copy All to Merge Result\tCtrl+Alt+Shift+A"));
+		pCmdUI->Enable(GetDocument()->IsSemanticMergeEnabled());
+		return;
+	}
 	if (GetDocument()->m_nBuffers == 3)
 	{
 		static const TCHAR* paneNames[] = { _T("Left"), _T("Middle"), _T("Right") };
@@ -2231,6 +2253,9 @@ void CMergeEditView::OnUpdateSemanticMergeAll(CCmdUI* pCmdUI)
 void CMergeEditView::OnSemanticMergeToPane(UINT nID)
 {
 	const int dstPane = GetTargetPaneForSemanticMergeCommand(nID);
+	if (SemanticMergeToResult(dstPane, false))
+		return;
+
 	if (!CanSemanticMergeToPane(dstPane))
 	{
 		AfxMessageBox(_("Safe semantic copy is not available for that destination pane.").c_str(), MB_ICONINFORMATION);
@@ -2284,9 +2309,94 @@ void CMergeEditView::OnUpdateSemanticMergeToPane(CCmdUI* pCmdUI)
 	pCmdUI->Enable(CanSemanticMergeToPane(dstPane));
 }
 
+/**
+ * @brief Does safe semantic copy go to a merge result pane here?
+ */
+bool CMergeEditView::UsesMergeResultForSemanticMerge() const
+{
+	return GetDocument()->m_nBuffers == 3 && GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED);
+}
+
+/**
+ * @brief Safe semantic copy with a merge result pane available: like
+ * Auto Merge it works on the merge result and leaves the compared files
+ * untouched. The result pane shows what changed and can undo it, so
+ * there is no preview.
+ * @return false when there is no merge result pane to use.
+ */
+bool CMergeEditView::SemanticMergeToResult(int dstPane, bool bAll)
+{
+	if (!UsesMergeResultForSemanticMerge())
+		return false;
+
+	CMergeDoc* pDoc = GetDocument();
+	if (!CanSemanticMergeToPane(dstPane) && !pDoc->GetMergeResultBuildState())
+	{
+		AfxMessageBox(_("Safe semantic copy is not available for the current pane.").c_str(), MB_ICONINFORMATION);
+		return true;
+	}
+
+	// From the result pane the current difference is meant, from a
+	// compared pane the one at the cursor
+	const bool bFromResult = pDoc->GetMergeResultBuildState() &&
+		CWnd::GetFocus() == static_cast<CWnd*>(pDoc->GetMergeResultView());
+
+	CWaitCursor waitstatus;
+	if (!pDoc->GetMergeResultBuildState() && !pDoc->StartMergeSession(2 - dstPane, false, true))
+		return true;
+	dstPane = pDoc->GetMergeDestPane();
+
+	String message;
+	bool applied = false;
+	if (bAll)
+	{
+		applied = pDoc->DoAllSemanticMergeSuggestions(dstPane, message);
+	}
+	else
+	{
+		int nDiff = -1;
+		int anchorPane = -1;
+		int anchorLine = -1;
+		if (bFromResult)
+		{
+			nDiff = pDoc->GetCurrentDiff();
+			if (nDiff != -1 && !pDoc->m_diffList.IsDiffSignificant(nDiff))
+				nDiff = -1;
+			if (nDiff == -1)
+				pDoc->FindFirstSemanticMergeSuggestion(dstPane, nDiff, message);
+		}
+		else
+		{
+			nDiff = GetSemanticMergeDiffOrSuggested(dstPane, message);
+			if (nDiff != -1)
+				GetSemanticMergeAnchor(nDiff, anchorPane, anchorLine);
+		}
+		if (nDiff == -1)
+		{
+			AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+			return true;
+		}
+		applied = pDoc->DoSemanticMergeSuggestion(dstPane, nDiff, message, anchorPane, anchorLine, true);
+		if (applied)
+			pDoc->OnResultPaneCurrentDiffChanged(nDiff);
+	}
+
+	if (applied)
+		RootLogger::Info(message);
+	else
+		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);
+	return true;
+}
+
 bool CMergeEditView::CanSemanticMergeToPane(int dstPane)
 {
 	const CMergeDoc* pDoc = GetDocument();
+	if (UsesMergeResultForSemanticMerge())
+	{
+		// the copy goes to the merge result, which stands for one pane
+		return dstPane >= 0 && dstPane < pDoc->m_nBuffers && pDoc->IsSemanticMergeEnabled() &&
+			(!pDoc->GetMergeResultBuildState() || dstPane == pDoc->GetMergeDestPane());
+	}
 	return
 		pDoc->m_nBuffers == 3 &&
 		dstPane >= 0 &&

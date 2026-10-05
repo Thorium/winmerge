@@ -31,6 +31,7 @@
 class CLineFilterHelperMenu;
 class CMainFrame;
 class CMergeResultTextBuffer;
+namespace SemanticMerge { struct Suggestion; }
 typedef CTypedPtrList<CPtrList, CMergeDoc*> MergeDocList;
 
 /**
@@ -354,6 +355,11 @@ public:
 	CMergeResultTextBuffer* GetMergeResultBuffer() const { return m_ptResultBuf.get(); }
 	bool IsMergeResultPaneVisible() const;
 	int GetMergeBasePane() const { return m_nMergeBasePane; }
+	int GetMergeDestPane() const;
+	/** @brief Does a safe semantic copy into dstPane go to the merge result? */
+	bool IsSemanticMergeToResult(int dstPane) const;
+	/** @brief Try safe semantic copy on the unresolved conflicts of the merge result */
+	int DoSemanticMergeConflictsToResult();
 	bool StartMergeSession(int nBasePane, bool bAutoMerge, bool bWithMessage);
 	bool EndMergeSession();
 	bool GetMergeResultBuildState() const { return m_bResultBuilt; }
@@ -406,6 +412,11 @@ private:
 	String BuildExpandedResultText() const;
 	bool AdjustResultSegmentsAfterLineDeletion(int nRemovedBegin, int nCount);
 	void EnsureNoLinesPlaceholder(int nSegment);
+	void GetPaneRealLines(int nPane, int nApparentBegin, int nApparentEnd, std::vector<String>& lines, std::vector<int>* pApparent) const;
+	bool MapPaneLineToResult(int nPane, int nApparentLine, int& nResultLine) const;
+	bool IsResultCommonTextIntact(int nApparentBegin, int nApparentEnd) const;
+	bool ApplySemanticSuggestionToResult(int dstPane, const SemanticMerge::Suggestion& suggestion, bool bExplicit,
+		bool& bGroupWithPrevious, String& message);
 	std::unique_ptr<CMergeResultTextBuffer> m_ptResultBuf; /**< Merge result buffer (not part of the diff) */
 	CMergeResultView* m_pMergeResultView; /**< Merge result view, or nullptr */
 	std::vector<MergeResultSegment> m_resultSegments; /**< Segments covering the result buffer */

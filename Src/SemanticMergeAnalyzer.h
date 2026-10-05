@@ -121,6 +121,8 @@ struct Suggestion
 	String replacementText;
 	String previewText;
 	String displayName;
+	/** Source definitions (pane and range) whose text an insert-only suggestion inserts. */
+	std::vector<DefinitionInfo> insertedDefs;
 };
 
 /**

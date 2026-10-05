@@ -105,6 +105,8 @@ BEGIN
         MENUITEM "Choose Middle for All Unresolved Conflicts", ID_MERGE_RESULT_CHOOSE_ALL_2ND
         MENUITEM "Choose Right for All Unresolved Conflicts",  ID_MERGE_RESULT_CHOOSE_ALL_3RD
         MENUITEM "A&uto Merge\tCtrl+Alt+M",     ID_AUTO_MERGE
+        MENUITEM "Safe Semantic Cop&y\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
+        MENUITEM "Safe Semantic Copy A&ll",     ID_SEMANTIC_MERGE_ALL
         MENUITEM SEPARATOR
         MENUITEM "&Undo\tCtrl+Z",               ID_EDIT_UNDO
         MENUITEM "&Redo\tCtrl+Y",               ID_EDIT_REDO
@@ -143,6 +145,8 @@ BEGIN
         MENUITEM "Choose Middle for All Unresolved Conflicts", ID_MERGE_RESULT_CHOOSE_ALL_2ND
         MENUITEM "Choose Right for All Unresolved Conflicts",  ID_MERGE_RESULT_CHOOSE_ALL_3RD
         MENUITEM "A&uto Merge\tCtrl+Alt+M",     ID_AUTO_MERGE
+        MENUITEM "Safe Semantic Cop&y\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
+        MENUITEM "Safe Semantic Copy A&ll",     ID_SEMANTIC_MERGE_ALL
         MENUITEM SEPARATOR
         MENUITEM "&End Merge Session",          ID_MERGE_END_SESSION
     END

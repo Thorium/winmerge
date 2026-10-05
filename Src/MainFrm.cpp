@@ -1199,26 +1199,26 @@ bool CMainFrame::ShowTextOrTableMergeDoc(std::optional<bool> table, IDirDoc * pD
 				bShowMergeResultPane = GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED);
 			}
 			if (dwFlags[pane] & FFILEOPEN_SEMANTIC_AUTOMERGE)
+			{
 				nSemanticAutoMergePane = pane;
+				if (nFiles == 3)
+				{
+					nMergeBasePane = 2 - pane;
+					bShowMergeResultPane = GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED);
+				}
+			}
 		}
 	}
-
-	// Semantic auto-merge edits and saves its destination pane directly,
-	// so that run does not use the merge result pane
-	const bool bUseMergeResultPane =
-		GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED) && nSemanticAutoMergePane < 0;
-	if (!bUseMergeResultPane)
-		bShowMergeResultPane = false;
 
 	if (pOpenParams && !pOpenParams->m_strSaveAsPath.empty())
 	{
 		const String& strSaveAsPath = pOpenParams->m_strSaveAsPath;
-		if (bUseMergeResultPane)
+		if (GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED))
 			pMergeDoc->SetMergeResultSavePath(strSaveAsPath);
 		else
 			pMergeDoc->SetSaveAsPath(strSaveAsPath);
 		if (!bShowMergeResultPane)
-			bShowMergeResultPane = bUseMergeResultPane;
+			bShowMergeResultPane = GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED);
 	}
 	pMergeDoc->MoveOnLoad(
 		GetActivePaneFromFlags(nFiles, dwFlags),
@@ -1268,10 +1268,16 @@ bool CMainFrame::ShowTextOrTableMergeDoc(std::optional<bool> table, IDirDoc * pD
 		if (theApp.GetNonInteractive() && !lastSemanticMessage.empty())
 			CMergeApp::OutputConsole(lastSemanticMessage);
 
-		if (appliedSemanticMerge && !pMergeDoc->GetSaveAsPath().empty())
+		// in a merge session the semantic merge went to the merge result
+		const bool bToResult = pMergeDoc->IsSemanticMergeToResult(pane);
+		if (appliedSemanticMerge &&
+			!(bToResult ? pMergeDoc->GetMergeResultSavePath() : pMergeDoc->GetSaveAsPath()).empty())
 		{
 			bool bSaveSuccess = false;
-			pMergeDoc->DoSave(pMergeDoc->GetPath(pane).c_str(), bSaveSuccess, pane);
+			if (bToResult)
+				bSaveSuccess = pMergeDoc->SaveMergeResult(false);
+			else
+				pMergeDoc->DoSave(pMergeDoc->GetPath(pane).c_str(), bSaveSuccess, pane);
 			if (theApp.GetNonInteractive())
 				CMergeApp::OutputConsole(bSaveSuccess ? _T("Semantic CLI save succeeded.") : _T("Semantic CLI save failed."));
 		}

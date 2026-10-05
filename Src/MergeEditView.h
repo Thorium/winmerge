@@ -211,6 +211,8 @@ protected:
 	void OnDropFiles(const std::vector<String>& files);
 	void SelDiffCopy(int actPane);
 	bool CanSemanticMergeToPane(int dstPane);
+	bool UsesMergeResultForSemanticMerge() const;
+	bool SemanticMergeToResult(int dstPane, bool bAll);
 	int GetTargetPaneForSemanticMergeCommand(UINT nID) const;
 	int GetSemanticMergeDiff() const;
 	int GetSemanticMergeDiffOrSuggested(int dstPane, String& message) const;

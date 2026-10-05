@@ -87,6 +87,12 @@ public:
 	/** @brief Get the language name. */
 	const std::wstring& GetName() const { return m_sName; }
 
+	/**
+	 * @brief Parse a text on its own and count its syntax errors.
+	 * @return Number of error and missing nodes, or -1 if it cannot be parsed.
+	 */
+	int CountSyntaxErrors(const std::wstring& text) const;
+
 private:
 	/** @brief Helper to load and compile a .scm query file. */
 	TSQuery* LoadQuery(const std::wstring& sPath);

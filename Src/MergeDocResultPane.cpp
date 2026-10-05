@@ -1933,6 +1933,139 @@ bool CMergeDoc::IsResultCommonTextIntact(int nApparentBegin, int nApparentEnd) c
 }
 
 /**
+ * @brief Make the result read like a pane with some of its lines rewritten.
+ *
+ * The given differences take the pane's text, then the lines of the pane's
+ * range that differ from the new lines are replaced like a hand edit, so
+ * that the segment table follows. All of it is one undo group of its own,
+ * which is taken back if the rewrite does not work out.
+ *
+ * @return 1 when the result changed, 0 when it already read that way,
+ *         -1 when the rewrite is not possible.
+ */
+int CMergeDoc::RewritePaneLinesInResult(int nPane, int nBeginLine, int nEndLine,
+	const std::vector<String>& newLines, const std::vector<int>& diffs, bool& bGroupWithPrevious)
+{
+	std::vector<String> oldLines;
+	std::vector<int> oldApparent;
+	GetPaneRealLines(nPane, nBeginLine, nEndLine, oldLines, &oldApparent);
+	if (oldLines.empty())
+		return -1;
+
+	size_t nPrefix = 0;
+	while (nPrefix < oldLines.size() && nPrefix < newLines.size() && oldLines[nPrefix] == newLines[nPrefix])
+		++nPrefix;
+	size_t nSuffix = 0;
+	while (nSuffix < oldLines.size() - nPrefix && nSuffix < newLines.size() - nPrefix &&
+		oldLines[oldLines.size() - 1 - nSuffix] == newLines[newLines.size() - 1 - nSuffix])
+		++nSuffix;
+	const size_t nOldEnd = oldLines.size() - nSuffix; // exclusive
+	const size_t nNewEnd = newLines.size() - nSuffix; // exclusive
+	const bool bRewrite = nPrefix < nOldEnd || nPrefix < nNewEnd;
+
+	// A difference without lines of the pane shows as a placeholder line,
+	// which the rewrite must not run across
+	for (int nDiff : diffs)
+	{
+		const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
+		std::vector<String> lines;
+		GetPaneRealLines(nPane, pdi->dbegin, pdi->dend, lines, nullptr);
+		if (lines.empty() && nPrefix < nOldEnd &&
+			pdi->dbegin > oldApparent[nPrefix] && pdi->dend < oldApparent[nOldEnd - 1])
+			return -1;
+	}
+
+	CCrystalTextView* pSource = (m_pMergeResultView != nullptr &&
+		m_pMergeResultView->GetSafeHwnd() != nullptr) ? m_pMergeResultView : nullptr;
+	const bool bOuterGroup = bGroupWithPrevious;
+	bGroupWithPrevious = false;
+	if (m_pMergeResultView != nullptr)
+		m_pMergeResultView->HideCursor();
+
+	bool bChanged = false;
+	for (int nDiff : diffs)
+	{
+		const MergeResultSegment& seg = m_resultSegments[m_resultDiffToSegment[nDiff]];
+		const bool bPaneText = seg.srcPanes.size() == 1 && seg.srcPanes[0] == nPane &&
+			(seg.state == ResultSegmentState::Common || seg.state == ResultSegmentState::Auto ||
+			 seg.state == ResultSegmentState::Chosen);
+		if (bPaneText)
+			continue;
+		ResultChooseSources(nDiff, { nPane }, bGroupWithPrevious);
+		bGroupWithPrevious = true;
+		bChanged = true;
+	}
+
+	bool bOk = true;
+	if (bRewrite)
+	{
+		int nInsertLine = -1, nLastOldLine = -1;
+		if (nPrefix < nOldEnd)
+		{
+			bOk = MapPaneLineToResult(nPane, oldApparent[nPrefix], nInsertLine) &&
+				MapPaneLineToResult(nPane, oldApparent[nOldEnd - 1], nLastOldLine) &&
+				nLastOldLine - nInsertLine == static_cast<int>(nOldEnd - nPrefix) - 1 &&
+				nLastOldLine + 1 < m_ptResultBuf->GetLineCount();
+		}
+		else if (nPrefix < oldLines.size())
+			bOk = MapPaneLineToResult(nPane, oldApparent[nPrefix], nInsertLine);
+		else
+		{
+			bOk = MapPaneLineToResult(nPane, oldApparent.back(), nInsertLine) &&
+				++nInsertLine < m_ptResultBuf->GetLineCount();
+		}
+
+		if (bOk)
+		{
+			const tchar_t* pszEol = m_ptBuf[nPane]->GetLineEol(oldApparent.front());
+			if (pszEol == nullptr || *pszEol == _T('\0'))
+				pszEol = m_ptResultBuf->GetDefaultEol();
+			String text;
+			for (size_t i = nPrefix; i < nNewEnd; ++i)
+				text += newLines[i] + pszEol;
+			const int nInserted = static_cast<int>(nNewEnd - nPrefix);
+
+			// the new lines go in first to keep the segment of the old ones alive
+			m_ptResultBuf->BeginUndoGroup(bGroupWithPrevious);
+			bool bInsertedText = false;
+			if (!text.empty())
+			{
+				int nEndLine2 = 0, nEndChar = 0;
+				bOk = m_ptResultBuf->InsertText(pSource, nInsertLine, 0, text.c_str(), text.length(),
+					nEndLine2, nEndChar, CE_ACTION_UNKNOWN, true);
+				bInsertedText = bOk;
+			}
+			if (bOk && nPrefix < nOldEnd)
+			{
+				bOk = m_ptResultBuf->DeleteText(pSource, nInsertLine + nInserted, 0,
+					nLastOldLine + nInserted + 1, 0, CE_ACTION_UNKNOWN, true, false);
+			}
+			m_ptResultBuf->FlushUndoGroup(pSource);
+			if (bOk || bInsertedText)
+			{
+				bGroupWithPrevious = true;
+				bChanged = true;
+			}
+		}
+	}
+
+	if (m_pMergeResultView != nullptr)
+	{
+		m_pMergeResultView->ShowCursor();
+		if (m_pMergeResultView->GetSafeHwnd() != nullptr)
+			m_pMergeResultView->Invalidate();
+	}
+	if (!bOk && bChanged && pSource != nullptr)
+	{
+		CEPoint ptCursorPos;
+		m_ptResultBuf->Undo(pSource, ptCursorPos);
+	}
+	if (!bOk || !bChanged)
+		bGroupWithPrevious = bOuterGroup;
+	return !bOk ? -1 : bChanged ? 1 : 0;
+}
+
+/**
  * @brief Apply a safe semantic copy suggestion for the merge destination
  * pane to the merge result.
  *
@@ -2037,6 +2170,26 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 				bHasSource[nPane] = bHasSource[nPane] || bSource;
 				if (!bSource && !isEditLine(apparent[i]) && !IsBlankLineText(lines[i]))
 					rest[nPane].push_back(lines[i]);
+			}
+		}
+		// A side that is neither the source of the copy nor the base has
+		// changes of its own; the copy must not run over them
+		if (!suggestion.insertOnly)
+		{
+			auto nonBlankLines = [&](int nPane)
+			{
+				std::vector<String> lines, nonBlank;
+				GetPaneRealLines(nPane, pdi->dbegin, pdi->dend, lines, nullptr);
+				AppendNonBlankLines(lines, nonBlank);
+				return nonBlank;
+			};
+			for (int nPane = 0; nPane < m_nBuffers; ++nPane)
+			{
+				if (nPane == dstPane || nPane == srcPane || nPane == nBasePane)
+					continue;
+				const std::vector<String> lines = nonBlankLines(nPane);
+				if (lines != nonBlankLines(dstPane) && (srcPane < 0 || lines != nonBlankLines(srcPane)))
+					return false;
 			}
 		}
 		// The other lines must read the same in every pane; where a pane
@@ -2194,114 +2347,501 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 	}
 
 	// 2. Otherwise the differences take the destination pane's text and
-	// the lines that differ are rewritten. This gets an undo group of its
-	// own, so that it can be taken back if the rewrite does not work out.
-	const bool bOuterGroup = bGroupWithPrevious;
-	bGroupWithPrevious = false;
-
-	size_t nPrefix = 0;
-	while (nPrefix < oldLines.size() && nPrefix < newLines.size() && oldLines[nPrefix] == newLines[nPrefix])
-		++nPrefix;
-	size_t nSuffix = 0;
-	while (nSuffix < oldLines.size() - nPrefix && nSuffix < newLines.size() - nPrefix &&
-		oldLines[oldLines.size() - 1 - nSuffix] == newLines[newLines.size() - 1 - nSuffix])
-		++nSuffix;
-	const size_t nOldEnd = oldLines.size() - nSuffix; // exclusive
-	const size_t nNewEnd = newLines.size() - nSuffix; // exclusive
-	const bool bRewrite = nPrefix < nOldEnd || nPrefix < nNewEnd;
-
-	// A difference without destination lines shows as a placeholder line,
-	// which the rewrite must not run across
-	for (int nDiff : diffs)
-	{
-		const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
-		std::vector<String> lines;
-		GetPaneRealLines(dstPane, pdi->dbegin, pdi->dend, lines, nullptr);
-		if (lines.empty() && nPrefix < nOldEnd &&
-			pdi->dbegin > oldApparent[nPrefix] && pdi->dend < oldApparent[nOldEnd - 1])
-		{
-			bGroupWithPrevious = bOuterGroup;
-			message = failed;
-			return false;
-		}
-	}
-
-	if (m_pMergeResultView != nullptr)
-		m_pMergeResultView->HideCursor();
-	bool bChanged = false;
-	for (int nDiff : diffs)
-		bChanged = choose(nDiff, { dstPane }) || bChanged;
-
-	bool bOk = true;
-	if (bRewrite)
-	{
-		int nInsertLine = -1, nLastOldLine = -1;
-		if (nPrefix < nOldEnd)
-		{
-			bOk = MapPaneLineToResult(dstPane, oldApparent[nPrefix], nInsertLine) &&
-				MapPaneLineToResult(dstPane, oldApparent[nOldEnd - 1], nLastOldLine) &&
-				nLastOldLine - nInsertLine == static_cast<int>(nOldEnd - nPrefix) - 1 &&
-				nLastOldLine + 1 < m_ptResultBuf->GetLineCount();
-		}
-		else if (nPrefix < oldLines.size())
-			bOk = MapPaneLineToResult(dstPane, oldApparent[nPrefix], nInsertLine);
-		else
-		{
-			bOk = MapPaneLineToResult(dstPane, oldApparent.back(), nInsertLine) &&
-				++nInsertLine < m_ptResultBuf->GetLineCount();
-		}
-
-		if (bOk)
-		{
-			const tchar_t* pszEol = pDstBuf->GetLineEol(nEditBegin);
-			if (pszEol == nullptr || *pszEol == _T('\0'))
-				pszEol = m_ptResultBuf->GetDefaultEol();
-			String text;
-			for (size_t i = nPrefix; i < nNewEnd; ++i)
-				text += newLines[i] + pszEol;
-			const int nInserted = static_cast<int>(nNewEnd - nPrefix);
-
-			// like a hand edit, so that the segment table follows; the new
-			// lines go in first to keep the segment of the old ones alive
-			m_ptResultBuf->BeginUndoGroup(bGroupWithPrevious);
-			bool bInsertedText = false;
-			if (!text.empty())
-			{
-				int nEndLine = 0, nEndChar = 0;
-				bOk = m_ptResultBuf->InsertText(pSource, nInsertLine, 0, text.c_str(), text.length(),
-					nEndLine, nEndChar, CE_ACTION_UNKNOWN, true);
-				bInsertedText = bOk;
-			}
-			if (bOk && nPrefix < nOldEnd)
-			{
-				bOk = m_ptResultBuf->DeleteText(pSource, nInsertLine + nInserted, 0,
-					nLastOldLine + nInserted + 1, 0, CE_ACTION_UNKNOWN, true, false);
-			}
-			m_ptResultBuf->FlushUndoGroup(pSource);
-			if (bOk || bInsertedText)
-			{
-				bGroupWithPrevious = true;
-				bChanged = true;
-			}
-		}
-	}
-
-	if (m_pMergeResultView != nullptr)
-	{
-		m_pMergeResultView->ShowCursor();
-		if (m_pMergeResultView->GetSafeHwnd() != nullptr)
-			m_pMergeResultView->Invalidate();
-	}
-	if (!bOk && bChanged && pSource != nullptr)
-	{
-		CEPoint ptCursorPos;
-		m_ptResultBuf->Undo(pSource, ptCursorPos);
-	}
-	if (!bOk || !bChanged)
-		bGroupWithPrevious = bOuterGroup;
-	if (!bOk)
+	// the lines that differ are rewritten
+	const int nRewritten = RewritePaneLinesInResult(dstPane, nEditBegin, nEditEnd, newLines, diffs, bGroupWithPrevious);
+	if (nRewritten < 0)
 		message = failed;
-	else if (!bChanged)
+	else if (nRewritten == 0)
 		message = _("The merge result already contains this suggestion.");
-	return bOk && bChanged;
+	return nRewritten > 0;
+
+}
+
+/**
+ * @brief Resolve a difference in the merge result with a text that is
+ * not the text of one pane (a merge of several).
+ */
+bool CMergeDoc::ResultResolveWithText(int nDiff, const String& resolvedText, bool bGroupWithPrevious)
+{
+	if (!m_bResultBuilt || nDiff < 0 || nDiff >= static_cast<int>(m_resultDiffToSegment.size()) ||
+		nDiff >= m_diffList.GetSize())
+		return false;
+	const int nSegment = m_resultDiffToSegment[nDiff];
+	if (nSegment < 0)
+		return false;
+	MergeResultSegment& seg = m_resultSegments[nSegment];
+	const int nLineCount = m_ptResultBuf->GetLineCount();
+	// the generated text ends every line with an EOL, so a line follows the segment
+	if (seg.nStartLine < 0 || seg.nLines < 0 || seg.nStartLine + seg.nLines >= nLineCount)
+		return false;
+
+	String text = resolvedText;
+	int nNewLines = 0;
+	for (size_t pos = 0; pos < text.length(); ++pos)
+	{
+		if (text[pos] == _T('\n') || (text[pos] == _T('\r') && (pos + 1 == text.length() || text[pos + 1] != _T('\n'))))
+			++nNewLines;
+	}
+	if (!text.empty() && text.back() != _T('\n') && text.back() != _T('\r'))
+	{
+		text += m_ptResultBuf->GetDefaultEol();
+		++nNewLines;
+	}
+	const bool bNoSrc = nNewLines == 0;
+	if (bNoSrc)
+	{
+		text = GetResultNoSrcLineText(m_ptResultBuf->GetDefaultEol());
+		nNewLines = 1;
+	}
+
+	CMergeResultTextBuffer::InternalOpGuard guard(*m_ptResultBuf);
+	CCrystalTextView* pSource = (m_pMergeResultView != nullptr &&
+		m_pMergeResultView->GetSafeHwnd() != nullptr) ? m_pMergeResultView : nullptr;
+
+	// lines written from here on are newer than the segment's baseline,
+	// which marks them as not coming from a pane
+	const uint32_t nBaseRevision = m_ptResultBuf->GetCurrentRevisionNumber();
+	m_ptResultBuf->BeginUndoGroup(bGroupWithPrevious);
+	if (seg.nLines > 0)
+		m_ptResultBuf->DeleteText(pSource, seg.nStartLine, 0, seg.nStartLine + seg.nLines, 0,
+			CE_ACTION_UNKNOWN, true, false);
+	int nEndLine = 0, nEndChar = 0;
+	m_ptResultBuf->InsertText(pSource, seg.nStartLine, 0, text.c_str(), text.length(),
+		nEndLine, nEndChar, CE_ACTION_UNKNOWN, true);
+	m_ptResultBuf->FlushUndoGroup(pSource);
+
+	const int nDelta = nNewLines - seg.nLines;
+	seg.state = ResultSegmentState::Edited;
+	seg.srcPanes.clear();
+	seg.srcPaneLines.clear();
+	seg.nLines = nNewLines;
+	seg.bNoSrc = bNoSrc;
+	seg.blockText.clear();
+	seg.nBlockLines = 0;
+	seg.nBaseRevision = nBaseRevision;
+	if (nDelta != 0)
+	{
+		for (size_t i = nSegment + 1; i < m_resultSegments.size(); ++i)
+			m_resultSegments[i].nStartLine += nDelta;
+	}
+	if (m_pMergeResultView != nullptr && m_pMergeResultView->GetSafeHwnd() != nullptr)
+		m_pMergeResultView->Invalidate();
+	return true;
+}
+
+/**
+ * @brief Try to resolve an unresolved conflict of the merge result by
+ * merging what each side changed in it, token by token.
+ *
+ * The merged text is only used when the file still parses as well with
+ * it as with either side's version of the conflict.
+ */
+bool CMergeDoc::TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPrevious)
+{
+	if (!m_bResultBuilt || m_nBuffers != 3 || nDiff < 0 || nDiff >= m_diffList.GetSize() ||
+		!IsResultDiffPending(nDiff))
+		return false;
+	const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
+	if (pdi == nullptr || pdi->op != OP_DIFF)
+		return false;
+
+	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
+	CTreeSitterParser* pParser = GetTreeSitterParser(panes.nMergeDestPane);
+	const CTreeSitterLanguage* pLang = (pParser != nullptr && pParser->HasLanguage()) ? pParser->GetLanguage() : nullptr;
+	if (pLang == nullptr)
+		return false;
+
+	const String baseText = GetPaneApparentLinesText(panes.nBasePane, pdi->dbegin, pdi->dend, nullptr);
+	const String mineText = GetPaneApparentLinesText(panes.nMinePane, pdi->dbegin, pdi->dend, nullptr);
+	const String theirsText = GetPaneApparentLinesText(panes.nTheirsPane, pdi->dbegin, pdi->dend, nullptr);
+	String merged;
+	if (!SemanticMerge::MergeTokensThreeWay(baseText, mineText, theirsText,
+			SemanticMerge::TraitsForLanguage(pLang->GetName()), merged))
+		return false;
+
+	// The merge must not break the syntax: compare the whole file with the
+	// conflict merged against the file with either side's version of it
+	const int nLastLine = m_ptBuf[panes.nBasePane]->GetLineCount() - 1;
+	const String before = GetPaneApparentLinesText(panes.nBasePane, 0, pdi->dbegin - 1, nullptr);
+	const String after = GetPaneApparentLinesText(panes.nBasePane, pdi->dend + 1, nLastLine, nullptr);
+	const int nMergedErrors = pLang->CountSyntaxErrors(before + merged + after);
+	const int nMineErrors = pLang->CountSyntaxErrors(before + mineText + after);
+	const int nTheirsErrors = pLang->CountSyntaxErrors(before + theirsText + after);
+	if (nMergedErrors < 0 || nMergedErrors > (std::max)(nMineErrors, nTheirsErrors))
+		return false;
+
+	if (!ResultResolveWithText(nDiff, merged, bGroupWithPrevious))
+		return false;
+	bGroupWithPrevious = true;
+	return true;
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Definition-level merges in the merge result
+
+namespace
+{
+
+OP_TYPE OnlyPaneOp(int nPane)
+{
+	return nPane == 0 ? OP_1STONLY : nPane == 1 ? OP_2NDONLY : OP_3RDONLY;
+}
+
+/**
+ * @brief Definitions with their range in whole lines of their own text.
+ *
+ * Some grammars let a definition run on to where the next one starts,
+ * which takes in the blank lines and the comment in front of the next
+ * definition. Those lines are cut off the end.
+ */
+std::vector<CTreeSitterParser::TagRange> WholeLineTags(std::vector<CTreeSitterParser::TagRange> tags,
+	const CDiffTextBuffer& buf, const std::vector<String>& lineCommentPrefixes)
+{
+	for (auto& tag : tags)
+	{
+		while (tag.endLine > tag.startLine && tag.endLine < buf.GetLineCount())
+		{
+			const tchar_t* pszLine = buf.GetLineChars(tag.endLine);
+			const int nLineLength = buf.GetLineLength(tag.endLine);
+			// only the part of the line that is inside the range counts
+			const int nLength = (std::min)(tag.endChar, nLineLength);
+			int nFirst = 0;
+			while (nFirst < nLength && (pszLine[nFirst] == _T(' ') || pszLine[nFirst] == _T('\t')))
+				++nFirst;
+			bool bCut = nFirst == nLength;
+			for (const String& prefix : lineCommentPrefixes)
+			{
+				bCut = bCut || (!prefix.empty() && nFirst + static_cast<int>(prefix.length()) <= nLineLength &&
+					String(pszLine + nFirst, prefix.length()) == prefix);
+			}
+			if (!bCut)
+				break;
+			--tag.endLine;
+			tag.endChar = buf.GetLineLength(tag.endLine);
+		}
+	}
+	return tags;
+}
+
+/** @brief Name of the innermost definition around a definition, empty for none. */
+std::string EnclosingTagName(const std::vector<CTreeSitterParser::TagRange>& tags, const CTreeSitterParser::TagRange& tag)
+{
+	const CTreeSitterParser::TagRange* pEnclosing = nullptr;
+	for (const auto& other : tags)
+	{
+		if (other.startByte <= tag.startByte && other.endByte >= tag.endByte &&
+			(other.startByte != tag.startByte || other.endByte != tag.endByte) &&
+			(pEnclosing == nullptr || other.endByte - other.startByte < pEnclosing->endByte - pEnclosing->startByte))
+			pEnclosing = &other;
+	}
+	return pEnclosing != nullptr ? pEnclosing->name : std::string();
+}
+
+/** @brief Does no other definition share lines with this one (nesting aside)? */
+bool HasLinesToItself(const std::vector<CTreeSitterParser::TagRange>& tags, const CTreeSitterParser::TagRange& tag)
+{
+	for (const auto& other : tags)
+	{
+		const bool bNested = (other.startByte <= tag.startByte && other.endByte >= tag.endByte) ||
+			(tag.startByte <= other.startByte && tag.endByte >= other.endByte);
+		if (!bNested && other.startLine <= tag.endLine && other.endLine >= tag.startLine)
+			return false;
+	}
+	return true;
+}
+
+std::vector<String> NonBlankSqueezed(const std::vector<String>& lines)
+{
+	std::vector<String> squeezed;
+	for (const String& line : lines)
+	{
+		String text;
+		for (tchar_t ch : line)
+		{
+			if (ch != _T(' ') && ch != _T('\t'))
+				text += ch;
+		}
+		if (!text.empty())
+			squeezed.push_back(std::move(text));
+	}
+	return squeezed;
+}
+
+}
+
+/**
+ * @brief The whole lines a definition spans.
+ * @param [out] apparent Apparent line of each returned (non-ghost) line.
+ */
+bool CMergeDoc::GetDefinitionLines(int nPane, int nStartLine, int nEndLine,
+	std::vector<String>& lines, std::vector<int>& apparent) const
+{
+	if (nStartLine < 0 || nEndLine < nStartLine || nEndLine >= m_ptBuf[nPane]->GetLineCount())
+		return false;
+	GetPaneRealLines(nPane, nStartLine, nEndLine, lines, &apparent);
+	return !lines.empty();
+}
+
+/**
+ * @brief A definition that one side moved while the other side changed
+ * it where it was: put the changed definition where it was moved to.
+ *
+ * A line-based merge sees a block that one side removed and the other
+ * changed, which is a conflict, plus an unrelated addition elsewhere. In
+ * terms of what each side did there is no conflict: one moved the
+ * definition, the other edited it.
+ *
+ * @param [in] nDiff An unresolved conflict inside the definition's old place.
+ */
+bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevious)
+{
+	if (!m_bResultBuilt || m_nBuffers != 3 || nDiff < 0 || nDiff >= m_diffList.GetSize() ||
+		static_cast<int>(m_resultDiffToSegment.size()) != m_diffList.GetSize() || !IsResultDiffPending(nDiff))
+		return false;
+	const DIFFRANGE* pConflict = m_diffList.DiffRangeAt(nDiff);
+	if (pConflict == nullptr || pConflict->op != OP_DIFF)
+		return false;
+
+	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
+	const int nBase = panes.nBasePane;
+	std::vector<CTreeSitterParser::TagRange> tags[3];
+	const CTreeSitterLanguage* pLang = nullptr;
+	for (int nPane = 0; nPane < 3; ++nPane)
+	{
+		CTreeSitterParser* pParser = GetTreeSitterParser(nPane);
+		if (pParser == nullptr || !pParser->HasLanguage())
+			return false;
+		pLang = pParser->GetLanguage();
+		if (pLang == nullptr)
+			return false;
+		tags[nPane] = WholeLineTags(pParser->GetTagRanges(), *m_ptBuf[nPane],
+			SemanticMerge::TraitsForLanguage(pLang->GetName()).lineCommentPrefixes);
+	}
+	if (pLang == nullptr)
+		return false;
+
+	// The innermost base definition the conflict lies in
+	const CTreeSitterParser::TagRange* pBaseTag = nullptr;
+	for (const auto& tag : tags[nBase])
+	{
+		if (tag.startLine <= pConflict->dend && tag.endLine >= pConflict->dbegin &&
+			(pBaseTag == nullptr || tag.endLine - tag.startLine < pBaseTag->endLine - pBaseTag->startLine))
+			pBaseTag = &tag;
+	}
+	if (pBaseTag == nullptr)
+		return false;
+	CTreeSitterParser::TagRange sideTags[3];
+	for (int nPane = 0; nPane < 3; ++nPane)
+	{
+		if (!SemanticMerge::TryFindUniqueTagByName(tags[nPane], pBaseTag->name, sideTags[nPane]))
+			return false;
+	}
+	const CTreeSitterParser::TagRange& baseTag = sideTags[nBase];
+	auto overlapsBase = [&](const CTreeSitterParser::TagRange& tag)
+	{
+		return tag.startLine <= baseTag.endLine && tag.endLine >= baseTag.startLine;
+	};
+
+	// One side (the mover) has the definition somewhere else, the other
+	// (the editor) still has it in place
+	int nMover = -1, nEditor = -1;
+	if (!overlapsBase(sideTags[panes.nMinePane]) && overlapsBase(sideTags[panes.nTheirsPane]))
+	{
+		nMover = panes.nMinePane;
+		nEditor = panes.nTheirsPane;
+	}
+	else if (!overlapsBase(sideTags[panes.nTheirsPane]) && overlapsBase(sideTags[panes.nMinePane]))
+	{
+		nMover = panes.nTheirsPane;
+		nEditor = panes.nMinePane;
+	}
+	else
+		return false;
+	const CTreeSitterParser::TagRange& moverTag = sideTags[nMover];
+	const CTreeSitterParser::TagRange& editorTag = sideTags[nEditor];
+
+	std::vector<String> defLines[3];
+	std::vector<int> defApparent[3];
+	for (int nPane = 0; nPane < 3; ++nPane)
+	{
+		// (a rewrite replaces whole lines)
+		if (!HasLinesToItself(tags[nPane], sideTags[nPane]) ||
+			!GetDefinitionLines(nPane, sideTags[nPane].startLine, sideTags[nPane].endLine,
+				defLines[nPane], defApparent[nPane]))
+			return false;
+	}
+
+	// The result is to read like the mover's file, with the definition in
+	// its new place carrying the editor's change. For that the editor must
+	// have changed nothing else in the differences this touches.
+	auto paneLines = [&](int nPane, const DIFFRANGE* pdi, const CTreeSitterParser::TagRange* pWithout)
+	{
+		std::vector<String> lines, kept;
+		std::vector<int> apparent;
+		GetPaneRealLines(nPane, pdi->dbegin, pdi->dend, lines, &apparent);
+		for (size_t n = 0; n < lines.size(); ++n)
+		{
+			if (pWithout == nullptr || apparent[n] < pWithout->startLine || apparent[n] > pWithout->endLine)
+				kept.push_back(lines[n]);
+		}
+		return NonBlankSqueezed(kept);
+	};
+	std::vector<int> diffs;
+	bool bConflictIsOld = false;
+	int nRegionBegin = (std::min)(baseTag.startLine, moverTag.startLine);
+	int nRegionEnd = (std::max)(baseTag.endLine, moverTag.endLine);
+	for (int i = 0; i < m_diffList.GetSize(); ++i)
+	{
+		const DIFFRANGE* pdi = m_diffList.DiffRangeAt(i);
+		// where the definition was (the editor still has it there) ...
+		const bool bOld = (pdi->dbegin <= baseTag.endLine && pdi->dend >= baseTag.startLine) ||
+			(pdi->dbegin <= editorTag.endLine && pdi->dend >= editorTag.startLine);
+		// ... and where the mover put it
+		const bool bNew = pdi->dbegin <= moverTag.endLine && pdi->dend >= moverTag.startLine;
+		if (!bOld && !bNew)
+			continue;
+		const int nSegment = m_resultDiffToSegment[i];
+		if (nSegment < 0)
+			return false;
+		const ResultSegmentState state = m_resultSegments[nSegment].state;
+		if (state == ResultSegmentState::Chosen || state == ResultSegmentState::Edited)
+			return false; // already decided by hand
+		if (paneLines(nEditor, pdi, bOld ? &editorTag : nullptr) != paneLines(nBase, pdi, bOld ? &baseTag : nullptr))
+			return false;
+		bConflictIsOld = bConflictIsOld || (bOld && i == nDiff);
+		diffs.push_back(i);
+		nRegionBegin = (std::min)(nRegionBegin, pdi->dbegin);
+		nRegionEnd = (std::max)(nRegionEnd, pdi->dend);
+	}
+	if (!bConflictIsOld || !IsResultCommonTextIntact(nRegionBegin, nRegionEnd))
+		return false;
+
+	// The definition as it should read: what the editor did to it, applied
+	// to the mover's copy
+	auto joinLines = [](const std::vector<String>& lines)
+	{
+		String text;
+		for (const String& line : lines)
+			text += line + _T("\n");
+		return text;
+	};
+	String mergedDef;
+	if (defLines[nMover] == defLines[nBase])
+		mergedDef = joinLines(defLines[nEditor]);
+	else if (NonBlankSqueezed(defLines[nEditor]) == NonBlankSqueezed(defLines[nBase]))
+		return false; // nothing but the move: the line merge does that
+	else if (!SemanticMerge::MergeTokensThreeWay(joinLines(defLines[nBase]), joinLines(defLines[nMover]),
+			joinLines(defLines[nEditor]), SemanticMerge::TraitsForLanguage(pLang->GetName()), mergedDef))
+		return false;
+	std::vector<String> mergedLines;
+	SplitTextIntoLines(mergedDef, mergedLines);
+	if (!mergedLines.empty() && mergedLines.back().empty())
+		mergedLines.pop_back(); // the text ends with a line end
+
+	// The mover's file must parse as well with the merged definition as before
+	const int nLastLine = m_ptBuf[nMover]->GetLineCount() - 1;
+	const String fileBefore = GetPaneApparentLinesText(nMover, 0, moverTag.startLine - 1, nullptr);
+	const String fileAfter = GetPaneApparentLinesText(nMover, moverTag.endLine + 1, nLastLine, nullptr);
+	const int nMergedErrors = pLang->CountSyntaxErrors(fileBefore + mergedDef + fileAfter);
+	const int nMoverErrors = pLang->CountSyntaxErrors(
+		fileBefore + GetPaneApparentLinesText(nMover, moverTag.startLine, moverTag.endLine, nullptr) + fileAfter);
+	if (nMergedErrors < 0 || nMergedErrors > nMoverErrors)
+		return false;
+
+	return RewritePaneLinesInResult(nMover, moverTag.startLine, moverTag.endLine, mergedLines, diffs,
+		bGroupWithPrevious) > 0;
+}
+
+/**
+ * @brief Both sides added the same definition, each in its own place:
+ * keep it once.
+ *
+ * To a line-based merge these are two unrelated additions, and it takes
+ * both, which leaves the definition in the result twice.
+ *
+ * @return Number of additions left out.
+ */
+int CMergeDoc::ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious)
+{
+	if (!m_bResultBuilt || m_nBuffers != 3 ||
+		static_cast<int>(m_resultDiffToSegment.size()) != m_diffList.GetSize())
+		return 0;
+	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
+	std::vector<CTreeSitterParser::TagRange> tags[3];
+	for (int nPane = 0; nPane < 3; ++nPane)
+	{
+		CTreeSitterParser* pParser = GetTreeSitterParser(nPane);
+		if (pParser == nullptr || !pParser->HasLanguage())
+			return 0;
+		const CTreeSitterLanguage* pLang = pParser->GetLanguage();
+		if (pLang == nullptr)
+			return 0;
+		tags[nPane] = WholeLineTags(pParser->GetTagRanges(), *m_ptBuf[nPane],
+			SemanticMerge::TraitsForLanguage(pLang->GetName()).lineCommentPrefixes);
+	}
+
+	// The pending difference that only this pane changed and that holds the whole definition
+	auto additionDiff = [&](int nPane, const CTreeSitterParser::TagRange& tag)
+	{
+		const int nDiff = m_diffList.LineToDiff(tag.startLine);
+		if (nDiff == -1 || m_resultDiffToSegment[nDiff] < 0 || !IsResultDiffPending(nDiff))
+			return -1;
+		const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
+		// (a definition's range can run on into the blank lines after it)
+		int nLastLine = (std::min)(tag.endLine, m_ptBuf[nPane]->GetLineCount() - 1);
+		while (nLastLine > tag.startLine && ((m_ptBuf[nPane]->GetLineFlags(nLastLine) & LF_GHOST) ||
+			IsBlankLineText(String(m_ptBuf[nPane]->GetLineChars(nLastLine), m_ptBuf[nPane]->GetLineLength(nLastLine)))))
+			--nLastLine;
+		return (pdi->op == OnlyPaneOp(nPane) && pdi->dend >= nLastLine) ? nDiff : -1;
+	};
+	auto squeezedLines = [&](int nPane, int nBegin, int nEnd)
+	{
+		std::vector<String> lines;
+		GetPaneRealLines(nPane, nBegin, nEnd, lines, nullptr);
+		return NonBlankSqueezed(lines);
+	};
+
+	int nResolved = 0;
+	const int nMine = panes.nMinePane, nTheirs = panes.nTheirsPane;
+	for (const auto& tag : tags[nMine])
+	{
+		bool bInBase = false;
+		for (const auto& other : tags[panes.nBasePane])
+			bInBase = bInBase || other.name == tag.name;
+		CTreeSitterParser::TagRange mineTag, theirsTag;
+		if (bInBase ||
+			!SemanticMerge::TryFindUniqueTagByName(tags[nMine], tag.name, mineTag) ||
+			!SemanticMerge::TryFindUniqueTagByName(tags[nTheirs], tag.name, theirsTag))
+			continue;
+		// the same definition: same text, in the same enclosing definition
+		if (EnclosingTagName(tags[nMine], mineTag) != EnclosingTagName(tags[nTheirs], theirsTag) ||
+			squeezedLines(nMine, mineTag.startLine, mineTag.endLine) !=
+			squeezedLines(nTheirs, theirsTag.startLine, theirsTag.endLine))
+			continue;
+		const int nMineDiff = additionDiff(nMine, mineTag);
+		const int nTheirsDiff = additionDiff(nTheirs, theirsTag);
+		if (nMineDiff == -1 || nTheirsDiff == -1 || nMineDiff == nTheirsDiff)
+			continue;
+
+		// Leave out the addition that has nothing the other one lacks
+		// (a doc comment in front of the definition is in both)
+		const DIFFRANGE* pMine = m_diffList.DiffRangeAt(nMineDiff);
+		const DIFFRANGE* pTheirs = m_diffList.DiffRangeAt(nTheirsDiff);
+		std::vector<String> mineLines = squeezedLines(nMine, pMine->dbegin, pMine->dend);
+		std::vector<String> theirsLines = squeezedLines(nTheirs, pTheirs->dbegin, pTheirs->dend);
+		std::sort(mineLines.begin(), mineLines.end());
+		std::sort(theirsLines.begin(), theirsLines.end());
+		int nDropDiff = -1;
+		if (std::includes(mineLines.begin(), mineLines.end(), theirsLines.begin(), theirsLines.end()))
+			nDropDiff = nTheirsDiff;
+		else if (std::includes(theirsLines.begin(), theirsLines.end(), mineLines.begin(), mineLines.end()))
+			nDropDiff = nMineDiff;
+		else
+			continue;
+
+		ResultChooseSource(nDropDiff, panes.nBasePane, bGroupWithPrevious);
+		bGroupWithPrevious = true;
+		++nResolved;
+	}
+	return nResolved;
 }

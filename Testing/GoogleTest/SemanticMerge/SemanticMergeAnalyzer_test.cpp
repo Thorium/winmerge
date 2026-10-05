@@ -958,4 +958,210 @@ TEST(SemanticMergeManualData, CliTripleStandardReplace)
 	EXPECT_NE(String::npos, middleSuggestion.replacementText.find(_T("base + 1")));
 }
 
+// ---------------------------------------------------------------------------
+// Token-level three-way merge
+// ---------------------------------------------------------------------------
+
+String TokenMerge(const String& base, const String& ours, const String& theirs, const tchar_t* language = _T("cpp"))
+{
+	String merged;
+	if (!SemanticMerge::MergeTokensThreeWay(base, ours, theirs, SemanticMerge::TraitsForLanguage(language), merged))
+		return _T("<conflict>");
+	return merged;
+}
+
+TEST(TokenMerge, DifferentTokensOnTheSameLineMerge)
+{
+	EXPECT_EQ(_T("\treturn bar(a, c);\n"),
+		TokenMerge(_T("\treturn foo(a, b);\n"), _T("\treturn foo(a, c);\n"), _T("\treturn bar(a, b);\n")));
+}
+
+TEST(TokenMerge, AdjacentLinesMerge)
+{
+	EXPECT_EQ(_T("int a = 10;\nint b = 20;\n"),
+		TokenMerge(_T("int a = 1;\nint b = 2;\n"), _T("int a = 10;\nint b = 2;\n"), _T("int a = 1;\nint b = 20;\n")));
+}
+
+TEST(TokenMerge, SameTokenChangedDifferentlyConflicts)
+{
+	EXPECT_EQ(_T("<conflict>"),
+		TokenMerge(_T("return a;\n"), _T("return x;\n"), _T("return y;\n")));
+}
+
+TEST(TokenMerge, SameChangeOnBothSidesIsTakenOnce)
+{
+	EXPECT_EQ(_T("return x + 2;\n"),
+		TokenMerge(_T("return a + 1;\n"), _T("return x + 1;\n"), _T("return x + 2;\n")));
+}
+
+TEST(TokenMerge, ReformattingDoesNotConflictWithAnEdit)
+{
+	EXPECT_EQ(_T("foo(a,\n    b,\n    d);\n"),
+		TokenMerge(_T("foo(a, b, c);\n"), _T("foo(a,\n    b,\n    c);\n"), _T("foo(a, b, d);\n")));
+}
+
+TEST(TokenMerge, InsertionAndEditMerge)
+{
+	EXPECT_EQ(_T("int a = 2;\nint n = 0;\nint b = a;\n"),
+		TokenMerge(_T("int a = 1;\nint b = a;\n"), _T("int a = 1;\nint n = 0;\nint b = a;\n"), _T("int a = 2;\nint b = a;\n")));
+}
+
+TEST(TokenMerge, DeletionAndEditMerge)
+{
+	EXPECT_EQ(_T("call(x);\n"),
+		TokenMerge(_T("call(a);\nlog(a);\n"), _T("call(a);\n"), _T("call(x);\nlog(a);\n")));
+}
+
+TEST(TokenMerge, SameWordAddedInDifferentPlacesConflicts)
+{
+	// both sides made the method readonly, each in its own position
+	EXPECT_EQ(_T("<conflict>"),
+		TokenMerge(_T("public override bool Equals(object obj)\n"),
+			_T("public readonly override bool Equals(object obj)\n"),
+			_T("public override readonly bool Equals(object obj)\n")));
+}
+
+TEST(TokenMerge, StringLiteralIsOneToken)
+{
+	EXPECT_EQ(_T("<conflict>"),
+		TokenMerge(_T("s = \"hello world\";\n"), _T("s = \"hello there\";\n"), _T("s = \"hi world\";\n")));
+}
+
+TEST(TokenMerge, RewrittenRegionIsNotMerged)
+{
+	EXPECT_EQ(_T("<conflict>"),
+		TokenMerge(_T("x = a + b;\n"), _T("total = sum(values) * scale(factor);\n"), _T("x = a + c;\n")));
+}
+
+TEST(TokenMerge, TwoAdditionsInTheSamePlaceConflict)
+{
+	EXPECT_EQ(_T("<conflict>"), TokenMerge(_T(""), _T("int a;\n"), _T("int b;\n")));
+}
+
+TEST(TokenMerge, PreprocessorLinesAreLeftAlone)
+{
+	EXPECT_EQ(_T("<conflict>"),
+		TokenMerge(_T("#define A 1\nint b = 2;\n"), _T("#define A 10\nint b = 2;\n"), _T("#define A 1\nint b = 20;\n")));
+}
+
+TEST(TokenMerge, CodeIsNotPulledIntoALineComment)
+{
+	// ours appends a comment, theirs changes the token after it: still two lines
+	EXPECT_EQ(_T("a = 1; // note\nb = 3;\n"),
+		TokenMerge(_T("a = 1;\nb = 2;\n"), _T("a = 1; // note\nb = 2;\n"), _T("a = 1;\nb = 3;\n")));
+}
+
+TEST(TokenMerge, IndentationChangeAndNewLineConflictWhereLayoutMatters)
+{
+	const String base = _T("if x:\n    a = 1\n    b = 2\n");
+	const String ours = _T("if x:\n    if y:\n        a = 1\n        b = 2\n");
+	const String theirs = _T("if x:\n    a = 1\n    c = 3\n    b = 2\n");
+	EXPECT_EQ(_T("<conflict>"), TokenMerge(base, ours, theirs, _T("python")));
+}
+
+TEST(TokenMerge, EditsMergeWhereLayoutMatters)
+{
+	EXPECT_EQ(_T("let a = 10\nlet b = 20\n"),
+		TokenMerge(_T("let a = 1\nlet b = 2\n"), _T("let a = 10\nlet b = 2\n"), _T("let a = 1\nlet b = 20\n"), _T("fsharp")));
+}
+
+// ---------------------------------------------------------------------------
+// Replay of real conflicts (run by Testing/SemanticMergeReplay/Replay.ps1 tokens)
+// ---------------------------------------------------------------------------
+
+String SqueezeLines(const std::vector<String>& lines)
+{
+	String squeezed;
+	for (const String& line : lines)
+	{
+		String text;
+		for (tchar_t ch : line)
+		{
+			if (ch != _T(' ') && ch != _T('\t') && ch != _T('\r'))
+				text += ch;
+		}
+		if (!text.empty())
+			squeezed += text + _T("\n");
+	}
+	return squeezed;
+}
+
+std::vector<String> SplitLines(const String& text)
+{
+	std::vector<String> lines;
+	size_t pos = 0;
+	while (pos < text.length())
+	{
+		size_t end = text.find(_T('\n'), pos);
+		if (end == String::npos)
+			end = text.length();
+		lines.push_back(text.substr(pos, end - pos));
+		pos = end + 1;
+	}
+	return lines;
+}
+
+/**
+ * Each line of the list file names a language, a file with the conflicts of
+ * one merge in diff3 format and the file as it was committed. A merge counts
+ * as confirmed when the committed file contains the merged text.
+ */
+TEST(TokenMergeCorpus, DISABLED_Replay)
+{
+#pragma warning(suppress: 4996)
+	const char* listPath = getenv("TOKEN_MERGE_CORPUS");
+	ASSERT_NE(nullptr, listPath);
+	std::ifstream list(listPath);
+	ASSERT_TRUE(list.good());
+
+	int conflicts = 0, merged = 0, confirmed = 0;
+	std::string entry;
+	while (std::getline(list, entry))
+	{
+		const size_t sep1 = entry.find('|');
+		const size_t sep2 = entry.find('|', sep1 + 1);
+		if (sep1 == std::string::npos || sep2 == std::string::npos)
+			continue;
+		const auto traits = SemanticMerge::TraitsForLanguage(ucr::toTString(entry.substr(0, sep1)));
+		const std::string conflictsPath = entry.substr(sep1 + 1, sep2 - sep1 - 1);
+		std::vector<String> lines, resultLines;
+		if (!LoadLines(conflictsPath, lines) || !LoadLines(entry.substr(sep2 + 1), resultLines))
+			continue;
+		const String result = SqueezeLines(resultLines);
+
+		int state = 0;
+		String sides[3]; // ours, base, theirs
+		for (const String& line : lines)
+		{
+			if (line.compare(0, 8, _T("<<<<<<< ")) == 0)
+			{
+				state = 1;
+				sides[0].clear(); sides[1].clear(); sides[2].clear();
+			}
+			else if (state == 1 && line.compare(0, 8, _T("||||||| ")) == 0)
+				state = 2;
+			else if (state == 2 && line == _T("======="))
+				state = 3;
+			else if (state == 3 && line.compare(0, 8, _T(">>>>>>> ")) == 0)
+			{
+				state = 0;
+				++conflicts;
+				String mergedText;
+				if (!SemanticMerge::MergeTokensThreeWay(sides[1], sides[0], sides[2], traits, mergedText))
+					continue;
+				++merged;
+				if (result.find(SqueezeLines(SplitLines(mergedText))) != String::npos)
+					++confirmed;
+				else
+					printf("UNCONFIRMED %s\n--- base\n%s--- ours\n%s--- theirs\n%s--- merged\n%s\n", conflictsPath.c_str(),
+						ucr::toUTF8(sides[1]).c_str(), ucr::toUTF8(sides[0]).c_str(),
+						ucr::toUTF8(sides[2]).c_str(), ucr::toUTF8(mergedText).c_str());
+			}
+			else if (state > 0)
+				sides[state - 1] += line + _T("\n");
+		}
+	}
+	printf("conflicts: %d, merged: %d, confirmed by the committed file: %d\n", conflicts, merged, confirmed);
+}
+
 } // namespace

@@ -65,6 +65,8 @@ LanguageTraits TraitsForLanguage(const String& languageName)
 		traits.stringQuoteChars = _T("\"");
 		traits.identifierRename = true;
 	}
+	traits.preprocessorLines = name == _T("c") || name == _T("cpp") || name == _T("c_sharp");
+	traits.layoutSensitive = name == _T("python") || name == _T("fsharp") || name == _T("fsharp_signature");
 	// Markup and data languages (json, html, css, xml, dtd) and unknown
 	// languages keep the defaults: every text heuristic disabled.
 
@@ -1532,6 +1534,327 @@ bool Analyzer::TryCollectSuggestions(int dstPane, const std::vector<DiffInfo>& d
 	}
 
 	suggestions.swap(collected);
+	return true;
+}
+
+
+// ---------------------------------------------------------------------------
+// Token-level three-way merge
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/** @brief A token and the white space in front of it. */
+struct MergeToken
+{
+	String text;
+	String space;
+	bool word = false;        /**< identifier, number or string literal */
+	bool lineComment = false; /**< runs to the end of its line */
+};
+
+bool IsMergeSpace(tchar_t ch)
+{
+	return ch == _T(' ') || ch == _T('\t') || ch == _T('\r') || ch == _T('\n');
+}
+
+bool IsMergeWordChar(tchar_t ch)
+{
+	return ch == _T('_') || ch > 127 || _istalnum(ch);
+}
+
+void TokenizeForMerge(const String& text, const LanguageTraits& traits,
+	std::vector<MergeToken>& tokens, String& trailingSpace)
+{
+	const size_t n = text.length();
+	size_t i = 0;
+	while (i < n)
+	{
+		size_t start = i;
+		while (i < n && IsMergeSpace(text[i]))
+			++i;
+		String space = text.substr(start, i - start);
+		if (i == n)
+		{
+			trailingSpace = space;
+			return;
+		}
+
+		MergeToken token;
+		token.space = std::move(space);
+		start = i;
+		bool found = false;
+		for (const String& prefix : traits.lineCommentPrefixes)
+		{
+			if (!prefix.empty() && text.compare(i, prefix.length(), prefix) == 0)
+			{
+				while (i < n && text[i] != _T('\r') && text[i] != _T('\n'))
+					++i;
+				// white space at the end of the comment is not part of it
+				while (i > start && (text[i - 1] == _T(' ') || text[i - 1] == _T('\t')))
+					--i;
+				token.lineComment = true;
+				found = true;
+				break;
+			}
+		}
+		if (!found && traits.stringQuoteChars.find(text[i]) != String::npos)
+		{
+			// a string literal is one token when it closes on its line
+			const tchar_t quote = text[i];
+			size_t j = i + 1;
+			while (j < n && text[j] != quote && text[j] != _T('\r') && text[j] != _T('\n'))
+				j += (text[j] == _T('\\') && j + 1 < n) ? 2 : 1;
+			if (j < n && text[j] == quote)
+			{
+				i = j + 1;
+				token.word = true;
+				found = true;
+			}
+		}
+		if (!found && IsMergeWordChar(text[i]))
+		{
+			while (i < n && IsMergeWordChar(text[i]))
+				++i;
+			token.word = true;
+			found = true;
+		}
+		if (!found)
+			++i;
+		token.text = text.substr(start, i - start);
+		tokens.push_back(std::move(token));
+	}
+	trailingSpace.clear();
+}
+
+/**
+ * @brief Longest common subsequence of two id sequences.
+ * @param [out] matchA For each element of a, the index of its partner in b or -1.
+ * @return false when the sequences are too long to compare.
+ */
+bool MatchTokenSequences(const std::vector<int>& a, const std::vector<int>& b, std::vector<int>& matchA)
+{
+	const size_t n = a.size(), m = b.size();
+	matchA.assign(n, -1);
+	if (n == 0 || m == 0)
+		return true;
+	if (n * m > 6000000 || n > 60000 || m > 60000)
+		return false;
+	const size_t width = m + 1;
+	std::vector<uint16_t> table((n + 1) * width, 0);
+	for (size_t i = n; i-- > 0; )
+	{
+		for (size_t j = m; j-- > 0; )
+		{
+			table[i * width + j] = (a[i] == b[j]) ?
+				static_cast<uint16_t>(table[(i + 1) * width + j + 1] + 1) :
+				(std::max)(table[(i + 1) * width + j], table[i * width + j + 1]);
+		}
+	}
+	size_t i = 0, j = 0;
+	while (i < n && j < m)
+	{
+		if (a[i] == b[j])
+		{
+			matchA[i] = static_cast<int>(j);
+			++i;
+			++j;
+		}
+		else if (table[(i + 1) * width + j] >= table[i * width + j + 1])
+			++i;
+		else
+			++j;
+	}
+	return true;
+}
+
+bool HasLineBreak(const String& space)
+{
+	return space.find_first_of(_T("\r\n")) != String::npos;
+}
+
+bool HasPreprocessorLine(const String& text)
+{
+	size_t pos = 0;
+	while (pos < text.length())
+	{
+		size_t i = pos;
+		while (i < text.length() && (text[i] == _T(' ') || text[i] == _T('\t')))
+			++i;
+		if (i < text.length() && text[i] == _T('#'))
+			return true;
+		pos = text.find(_T('\n'), pos);
+		if (pos == String::npos)
+			break;
+		++pos;
+	}
+	return false;
+}
+
+}
+
+bool MergeTokensThreeWay(const String& baseText, const String& oursText, const String& theirsText,
+	const LanguageTraits& traits, String& merged)
+{
+	merged.clear();
+	if (traits.preprocessorLines &&
+		(HasPreprocessorLine(baseText) || HasPreprocessorLine(oursText) || HasPreprocessorLine(theirsText)))
+		return false;
+
+	// 0 = base, 1 = ours, 2 = theirs
+	std::vector<MergeToken> tokens[3];
+	String trailing[3];
+	TokenizeForMerge(baseText, traits, tokens[0], trailing[0]);
+	TokenizeForMerge(oursText, traits, tokens[1], trailing[1]);
+	TokenizeForMerge(theirsText, traits, tokens[2], trailing[2]);
+	if (tokens[0].empty())
+		return false; // two additions in the same place: nothing to tell them apart
+
+	std::unordered_map<String, int> idByText;
+	std::vector<int> ids[3];
+	for (int side = 0; side < 3; ++side)
+	{
+		for (const MergeToken& token : tokens[side])
+			ids[side].push_back(idByText.emplace(token.text, static_cast<int>(idByText.size())).first->second);
+	}
+
+	// What each side did to the base
+	std::vector<int> match[3];
+	for (int side = 1; side < 3; ++side)
+	{
+		if (!MatchTokenSequences(ids[0], ids[side], match[side]))
+			return false;
+		// A side that rewrote most of the region leaves too little to line
+		// the other side's change up against
+		const size_t kept = static_cast<size_t>(std::count_if(match[side].begin(), match[side].end(),
+			[](int partner) { return partner >= 0; }));
+		const size_t changed = (ids[0].size() - kept) + (ids[side].size() - kept);
+		if (changed > (std::max<size_t>)(4, ids[0].size()))
+			return false;
+	}
+
+	struct OutToken
+	{
+		const MergeToken* token;
+		String space;
+	};
+	std::vector<OutToken> out;
+	std::vector<int> insertedWords[3]; // ids of the words each side's changes bring in
+	bool layoutChanged[3] = { false, false, false };
+	bool multiLineChange[3] = { false, false, false };
+	int lastTakenSide = 0; // side whose change was emitted just before, 0 for none
+
+	// A token all three sides have keeps the layout of the side that changed it
+	auto emitStable = [&](size_t o, size_t a, size_t b)
+	{
+		const String& baseSpace = tokens[0][o].space;
+		const String& oursSpace = tokens[1][a].space;
+		const String& theirsSpace = tokens[2][b].space;
+		for (int side = 1; side < 3; ++side)
+		{
+			const String& sideSpace = side == 1 ? oursSpace : theirsSpace;
+			if (sideSpace != baseSpace && (HasLineBreak(sideSpace) || HasLineBreak(baseSpace)))
+				layoutChanged[side] = true;
+		}
+		const String& space = lastTakenSide == 1 ? oursSpace : lastTakenSide == 2 ? theirsSpace :
+			(oursSpace != baseSpace ? oursSpace : theirsSpace);
+		out.push_back({ &tokens[1][a], space });
+		lastTakenSide = 0;
+	};
+	// A changed stretch comes with its own layout, except in front: where
+	// the changing side left the white space alone, the other side's counts
+	auto emitTaken = [&](int side, size_t begin, size_t end, size_t baseBegin, size_t baseCount, size_t otherBegin)
+	{
+		for (size_t i = begin; i < end; ++i)
+		{
+			const String* space = &tokens[side][i].space;
+			if (i == begin && baseCount > 0 && *space == tokens[0][baseBegin].space)
+				space = &tokens[3 - side][otherBegin].space;
+			if (HasLineBreak(tokens[side][i].space))
+				multiLineChange[side] = true;
+			if (tokens[side][i].word)
+				insertedWords[side].push_back(ids[side][i]);
+			out.push_back({ &tokens[side][i], *space });
+		}
+		if (baseCount > 0 || end > begin)
+			lastTakenSide = side;
+	};
+
+	// Walk the base from one token that both sides kept to the next; what
+	// lies in between was changed by one side, by both alike, or by both
+	// differently, which is a conflict
+	size_t o = 0, a = 0, b = 0;
+	const size_t nBase = ids[0].size();
+	for (;;)
+	{
+		size_t sync = o;
+		while (sync < nBase && (match[1][sync] < 0 || match[2][sync] < 0))
+			++sync;
+		const size_t aEnd = sync < nBase ? static_cast<size_t>(match[1][sync]) : ids[1].size();
+		const size_t bEnd = sync < nBase ? static_cast<size_t>(match[2][sync]) : ids[2].size();
+
+		const bool oursSame = (aEnd - a == sync - o) && std::equal(ids[1].begin() + a, ids[1].begin() + aEnd, ids[0].begin() + o);
+		const bool theirsSame = (bEnd - b == sync - o) && std::equal(ids[2].begin() + b, ids[2].begin() + bEnd, ids[0].begin() + o);
+		if (oursSame && theirsSame)
+		{
+			for (size_t i = 0; i < sync - o; ++i)
+				emitStable(o + i, a + i, b + i);
+		}
+		else if (oursSame)
+			emitTaken(2, b, bEnd, o, sync - o, a);
+		else if (theirsSame)
+			emitTaken(1, a, aEnd, o, sync - o, b);
+		else if ((aEnd - a == bEnd - b) && std::equal(ids[1].begin() + a, ids[1].begin() + aEnd, ids[2].begin() + b))
+		{
+			// the same change on both sides; it is not one side's own
+			for (size_t i = a; i < aEnd; ++i)
+				out.push_back({ &tokens[1][i], tokens[1][i].space });
+			lastTakenSide = 1;
+		}
+		else
+			return false;
+
+		if (sync == nBase)
+			break;
+		emitStable(sync, aEnd, bEnd);
+		o = sync + 1;
+		a = aEnd + 1;
+		b = bEnd + 1;
+	}
+	const String& trailingSpace = lastTakenSide == 1 ? trailing[1] : lastTakenSide == 2 ? trailing[2] :
+		(trailing[1] != trailing[0] ? trailing[1] : trailing[2]);
+
+	// Both sides bringing in the same word in different places is most
+	// likely the same change made twice; applying both would double it
+	std::sort(insertedWords[1].begin(), insertedWords[1].end());
+	for (int id : insertedWords[2])
+	{
+		if (std::binary_search(insertedWords[1].begin(), insertedWords[1].end(), id))
+			return false;
+	}
+
+	// Where indentation carries meaning, one side's new lines cannot be
+	// fitted into the other side's new layout
+	if (traits.layoutSensitive &&
+		((layoutChanged[1] && (layoutChanged[2] || multiLineChange[2])) ||
+		 (layoutChanged[2] && multiLineChange[1])))
+		return false;
+
+	for (size_t i = 0; i < out.size(); ++i)
+	{
+		if (i > 0)
+		{
+			// the joined text must still read as the same tokens
+			if (out[i - 1].token->lineComment && !HasLineBreak(out[i].space))
+				return false;
+			if (out[i].space.empty() && out[i - 1].token->word && out[i].token->word)
+				return false;
+		}
+		merged += out[i].space;
+		merged += out[i].token->text;
+	}
+	merged += trailingSpace;
 	return true;
 }
 

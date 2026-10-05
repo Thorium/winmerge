@@ -62,6 +62,8 @@ struct LanguageTraits
 	String stringQuoteChars;                 /**< empty: string literal replay disabled */
 	bool cStyleParameters = false;           /**< enables parameter rename replay */
 	bool identifierRename = false;           /**< enables identifier rename replay */
+	bool preprocessorLines = false;          /**< lines starting with '#' are directives: no token merge across them */
+	bool layoutSensitive = false;            /**< indentation carries meaning */
 };
 
 /**
@@ -213,6 +215,20 @@ String RenderLineCommentedBlock(const String& text, const String& prefix);
 
 /** @brief Find the definition that best overlaps the given line range. */
 bool TryFindBestTagForDiff(const std::vector<TagRange>& tags, int startLine, int endLine, TagRange& bestTag);
+
+/**
+ * @brief Three-way merge of a conflicting region by what each side changed.
+ *
+ * The region is compared token by token: what ours did to the base and what
+ * theirs did to the base are both applied when they touch different tokens.
+ * White space is layout, not content: a side that only re-wrapped or
+ * re-indented does not conflict with the other side's edit.
+ *
+ * @return false when the changes overlap, or when a side changed so much
+ *         that the changes cannot be lined up reliably.
+ */
+bool MergeTokensThreeWay(const String& baseText, const String& oursText, const String& theirsText,
+	const LanguageTraits& traits, String& merged);
 
 /** @brief Find the definition with the given name; fails if absent or ambiguous. */
 bool TryFindUniqueTagByName(const std::vector<TagRange>& tags, const std::string& name, TagRange& found);

@@ -243,6 +243,44 @@ CTreeSitterLanguage::CTreeSitterLanguage()
 {
 }
 
+int CTreeSitterLanguage::CountSyntaxErrors(const std::wstring& text) const
+{
+	if (!m_pLanguage)
+		return -1;
+	TSParser* pParser = ts_parser_new();
+	if (!pParser || !ts_parser_set_language(pParser, m_pLanguage))
+	{
+		if (pParser)
+			ts_parser_delete(pParser);
+		return -1;
+	}
+	TSTree* pTree = ts_parser_parse_string_encoding(pParser, nullptr,
+		reinterpret_cast<const char*>(text.data()),
+		static_cast<uint32_t>(text.size() * sizeof(wchar_t)), TSInputEncodingUTF16LE);
+	int nErrors = -1;
+	if (pTree)
+	{
+		nErrors = 0;
+		// only subtrees flagged as containing an error need a visit
+		std::vector<TSNode> pending{ ts_tree_root_node(pTree) };
+		while (!pending.empty())
+		{
+			const TSNode node = pending.back();
+			pending.pop_back();
+			if (ts_node_is_error(node) || ts_node_is_missing(node))
+				++nErrors;
+			if (!ts_node_has_error(node))
+				continue;
+			const uint32_t nChildren = ts_node_child_count(node);
+			for (uint32_t i = 0; i < nChildren; ++i)
+				pending.push_back(ts_node_child(node, i));
+		}
+		ts_tree_delete(pTree);
+	}
+	ts_parser_delete(pParser);
+	return nErrors;
+}
+
 CTreeSitterLanguage::~CTreeSitterLanguage()
 {
 	if (m_pHighlightQuery)

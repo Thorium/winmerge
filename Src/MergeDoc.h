@@ -415,6 +415,14 @@ private:
 	void GetPaneRealLines(int nPane, int nApparentBegin, int nApparentEnd, std::vector<String>& lines, std::vector<int>* pApparent) const;
 	bool MapPaneLineToResult(int nPane, int nApparentLine, int& nResultLine) const;
 	bool IsResultCommonTextIntact(int nApparentBegin, int nApparentEnd) const;
+	int RewritePaneLinesInResult(int nPane, int nBeginLine, int nEndLine, const std::vector<String>& newLines,
+		const std::vector<int>& diffs, bool& bGroupWithPrevious);
+	bool ResultResolveWithText(int nDiff, const String& resolvedText, bool bGroupWithPrevious);
+	bool TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPrevious);
+	bool TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevious);
+	int ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious);
+	bool GetDefinitionLines(int nPane, int nStartLine, int nEndLine,
+		std::vector<String>& lines, std::vector<int>& apparent) const;
 	bool ApplySemanticSuggestionToResult(int dstPane, const SemanticMerge::Suggestion& suggestion, bool bExplicit,
 		bool& bGroupWithPrevious, String& message);
 	std::unique_ptr<CMergeResultTextBuffer> m_ptResultBuf; /**< Merge result buffer (not part of the diff) */

@@ -407,6 +407,8 @@ int CMergeDoc::DoSemanticMergeConflictsToResult()
 
 	int nApplied = 0;
 	bool bGroupWithPrevious = false;
+	// not a conflict to the line merge, but wrong once it has taken both
+	nApplied += ResolveDuplicateAdditionsInResult(bGroupWithPrevious);
 	for (int nDiff = 0; nDiff < m_diffList.GetSize(); ++nDiff)
 	{
 		const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
@@ -415,7 +417,13 @@ int CMergeDoc::DoSemanticMergeConflictsToResult()
 			continue;
 		SemanticMerge::Suggestion suggestion;
 		String message;
-		if (TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message) &&
+		// the local merge of the conflict's own lines first; a suggestion
+		// for the whole definition only where that does not work
+		if (TryTokenMergeConflictToResult(nDiff, bGroupWithPrevious))
+			++nApplied;
+		else if (TryMovedDefinitionMergeToResult(nDiff, bGroupWithPrevious))
+			++nApplied;
+		else if (TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message) &&
 			ApplySemanticSuggestionToResult(dstPane, suggestion, false, bGroupWithPrevious, message))
 			++nApplied;
 	}

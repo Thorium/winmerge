@@ -74,7 +74,6 @@
 #include "stringdiffs.h"
 #include "MergeCmdLineInfo.h"
 #include "OptionsFont.h"
-#include "JumpList.h"
 #include "DropHandler.h"
 #include "LanguageSelect.h"
 #include "Bitmap.h"
@@ -1763,7 +1762,7 @@ static bool AddToRecentDocs(const PathContext& paths,
 	Concurrent::CreateTask([params, title](){
 			if (SUCCEEDED(CoInitialize(nullptr)))
 			{
-				JumpList::AddToRecentDocs(_T(""), params, title, params, _T(""), 0);
+				MruHelper::AddRecentCompare({ title, params }, GetOptionsMgr()->GetInt(OPT_MRU_MAX));
 				CoUninitialize();
 			}
 			return 0;
@@ -3996,13 +3995,21 @@ LRESULT CMainFrame::OnMDIButtonContextMenu(WPARAM wParam, LPARAM lParam)
 
 void CMainFrame::OnMRUs(UINT nID)
 {
-	std::vector<JumpList::Item> mrus = JumpList::GetRecentDocs(GetOptionsMgr()->GetInt(OPT_MRU_MAX));
+	std::vector<MruHelper::RecentCompare> mrus = MruHelper::GetRecentCompares(GetOptionsMgr()->GetInt(OPT_MRU_MAX));
 	const size_t idx = static_cast<size_t>(nID) - ID_MRU_FIRST;
 	if (idx < mrus.size())
-	{
-		MergeCmdLineInfo cmdInfo((_T("\"") + mrus[idx].path + _T("\" ") + mrus[idx].params).c_str());
-		theApp.ParseArgsAndDoOpen(cmdInfo, this);
-	}
+		OpenRecentCompare(mrus[idx].params);
+}
+
+/**
+ * @brief Open a comparison of the recent comparison list (MruHelper::GetRecentCompares)
+ * @param [in] params Command line parameters of the entry (without the program name)
+ */
+void CMainFrame::OpenRecentCompare(const String& params)
+{
+	// The first token is the program name, which MergeCmdLineInfo skips
+	MergeCmdLineInfo cmdInfo((_T("WinMergeU.exe ") + params).c_str());
+	theApp.ParseArgsAndDoOpen(cmdInfo, this);
 }
 
 void CMainFrame::OnUpdateNoMRUs(CCmdUI* pCmdUI)
@@ -4018,7 +4025,10 @@ void CMainFrame::OnUpdateNoMRUs(CCmdUI* pCmdUI)
 	while (i --)
 		::DeleteMenu(hMenu, 0, MF_BYPOSITION);
 
-	std::vector<JumpList::Item> mrus = JumpList::GetRecentDocs(GetOptionsMgr()->GetInt(OPT_MRU_MAX));
+	std::vector<MruHelper::RecentCompare> mrus = MruHelper::GetRecentCompares(GetOptionsMgr()->GetInt(OPT_MRU_MAX));
+	// Menu IDs are limited to ID_MRU_FIRST..ID_MRU_LAST (OPT_MRU_MAX allows more items)
+	if (mrus.size() > ID_MRU_LAST - ID_MRU_FIRST + 1)
+		mrus.resize(ID_MRU_LAST - ID_MRU_FIRST + 1);
 
 	if (mrus.size() == 0)
 	{

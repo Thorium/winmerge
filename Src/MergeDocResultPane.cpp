@@ -2224,8 +2224,9 @@ int CMergeDoc::RewritePaneLinesInResult(int nPane, int nBeginLine, int nEndLine,
 		if (m_pMergeResultView->GetSafeHwnd() != nullptr)
 			m_pMergeResultView->Invalidate();
 	}
-	if (!bOk && bChanged && pSource != nullptr)
+	if (!bOk && bChanged)
 	{
+		// (Undo takes a null view: it only updates the view's cursor when there is one)
 		CEPoint ptCursorPos;
 		m_ptResultBuf->Undo(pSource, ptCursorPos);
 	}
@@ -2686,7 +2687,7 @@ bool CMergeDoc::ResultResolveWithText(int nDiff, const String& resolvedText, boo
 bool CMergeDoc::TryContainedAdditionToResult(int nDiff, bool& bGroupWithPrevious)
 {
 	if (!m_bResultBuilt || m_nBuffers != 3 || nDiff < 0 || nDiff >= m_diffList.GetSize() ||
-		!IsResultDiffPending(nDiff))
+		static_cast<int>(m_resultDiffToSegment.size()) != m_diffList.GetSize() || !IsResultDiffPending(nDiff))
 		return false;
 	const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
 	if (pdi == nullptr || pdi->op != OP_DIFF)
@@ -2698,7 +2699,12 @@ bool CMergeDoc::TryContainedAdditionToResult(int nDiff, bool& bGroupWithPrevious
 		return false;
 	GetPaneRealLines(panes.nMinePane, pdi->dbegin, pdi->dend, mineLines, nullptr);
 	GetPaneRealLines(panes.nTheirsPane, pdi->dbegin, pdi->dend, theirsLines, nullptr);
-	const SemanticMerge::DuplicateDrop drop = SemanticMerge::ChooseContainedAdditionToDrop(mineLines, theirsLines);
+	CTreeSitterParser* pParser = GetTreeSitterParser(panes.nMergeDestPane);
+	const CTreeSitterLanguage* pLang = (pParser != nullptr && pParser->HasLanguage()) ? pParser->GetLanguage() : nullptr;
+	if (pLang == nullptr)
+		return false;
+	const SemanticMerge::DuplicateDrop drop = SemanticMerge::ChooseContainedAdditionToDrop(mineLines, theirsLines,
+		SemanticMerge::TraitsForLanguage(pLang->GetName()));
 	if (drop == SemanticMerge::DuplicateDrop::None)
 		return false;
 	const int nKeep = drop == SemanticMerge::DuplicateDrop::Theirs ? panes.nMinePane : panes.nTheirsPane;
@@ -2716,7 +2722,7 @@ bool CMergeDoc::TryContainedAdditionToResult(int nDiff, bool& bGroupWithPrevious
 bool CMergeDoc::TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPrevious, String& why)
 {
 	if (!m_bResultBuilt || m_nBuffers != 3 || nDiff < 0 || nDiff >= m_diffList.GetSize() ||
-		!IsResultDiffPending(nDiff))
+		static_cast<int>(m_resultDiffToSegment.size()) != m_diffList.GetSize() || !IsResultDiffPending(nDiff))
 	{
 		why = _("the conflict is not pending.");
 		return false;
@@ -3075,6 +3081,7 @@ int CMergeDoc::ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious)
 		return 0;
 	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
 	std::vector<CTreeSitterParser::TagRange> tags[3];
+	bool bLayoutSensitive = false;
 	for (int nPane = 0; nPane < 3; ++nPane)
 	{
 		CTreeSitterParser* pParser = GetTreeSitterParser(nPane);
@@ -3083,8 +3090,9 @@ int CMergeDoc::ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious)
 		const CTreeSitterLanguage* pLang = pParser->GetLanguage();
 		if (pLang == nullptr)
 			return 0;
-		tags[nPane] = WholeLineTags(pParser->GetTagRanges(), *m_ptBuf[nPane],
-			SemanticMerge::TraitsForLanguage(pLang->GetName()).lineCommentPrefixes);
+		const SemanticMerge::LanguageTraits traits = SemanticMerge::TraitsForLanguage(pLang->GetName());
+		bLayoutSensitive = traits.layoutSensitive;
+		tags[nPane] = WholeLineTags(pParser->GetTagRanges(), *m_ptBuf[nPane], traits.lineCommentPrefixes);
 	}
 
 	// The pending difference that only this pane changed and that holds the whole definition
@@ -3121,9 +3129,15 @@ int CMergeDoc::ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious)
 			!SemanticMerge::TryFindUniqueTagByName(tags[nTheirs], tag.name, theirsTag))
 			continue;
 		// the same definition: same text, in the same enclosing definition
+		// (G5: where indentation carries meaning it is part of the text)
+		auto definitionText = [&](int nPane, const CTreeSitterParser::TagRange& defTag)
+		{
+			const std::vector<String> lines = paneLines(nPane, defTag.startLine, defTag.endLine);
+			return bLayoutSensitive ? SemanticMerge::IndentedNonBlankLines(lines, true) :
+				SemanticMerge::SqueezeNonBlankLines(lines);
+		};
 		if (EnclosingTagName(tags[nMine], mineTag) != EnclosingTagName(tags[nTheirs], theirsTag) ||
-			SemanticMerge::SqueezeNonBlankLines(paneLines(nMine, mineTag.startLine, mineTag.endLine)) !=
-			SemanticMerge::SqueezeNonBlankLines(paneLines(nTheirs, theirsTag.startLine, theirsTag.endLine)))
+			definitionText(nMine, mineTag) != definitionText(nTheirs, theirsTag))
 			continue;
 		const int nMineDiff = additionDiff(nMine, mineTag);
 		const int nTheirsDiff = additionDiff(nTheirs, theirsTag);
@@ -3132,8 +3146,24 @@ int CMergeDoc::ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious)
 
 		const DIFFRANGE* pMine = m_diffList.DiffRangeAt(nMineDiff);
 		const DIFFRANGE* pTheirs = m_diffList.DiffRangeAt(nTheirsDiff);
-		const SemanticMerge::DuplicateDrop drop = SemanticMerge::ChooseDuplicateAdditionToDrop(
-			paneLines(nMine, pMine->dbegin, pMine->dend), paneLines(nTheirs, pTheirs->dbegin, pTheirs->dend));
+		const std::vector<String> mineLines = paneLines(nMine, pMine->dbegin, pMine->dend);
+		const std::vector<String> theirsLines = paneLines(nTheirs, pTheirs->dbegin, pTheirs->dend);
+		SemanticMerge::DuplicateDrop drop = SemanticMerge::ChooseDuplicateAdditionToDrop(mineLines, theirsLines);
+		// Leaving a copy out puts the base's lines there. A side that put its
+		// copy in place of base lines removed those, so its copy is not the
+		// one to leave out; the other side's is, when it holds nothing more.
+		auto replacesBaseLines = [&](const DIFFRANGE* pdi)
+		{
+			return !SemanticMerge::SqueezeNonBlankLines(paneLines(panes.nBasePane, pdi->dbegin, pdi->dend)).empty();
+		};
+		if (drop == SemanticMerge::DuplicateDrop::Theirs && replacesBaseLines(pTheirs))
+		{
+			const bool bMineHasNothingMore =
+				SemanticMerge::ChooseDuplicateAdditionToDrop(theirsLines, mineLines) == SemanticMerge::DuplicateDrop::Theirs;
+			drop = bMineHasNothingMore ? SemanticMerge::DuplicateDrop::Mine : SemanticMerge::DuplicateDrop::None;
+		}
+		if (drop == SemanticMerge::DuplicateDrop::Mine && replacesBaseLines(pMine))
+			drop = SemanticMerge::DuplicateDrop::None;
 		if (drop == SemanticMerge::DuplicateDrop::None)
 			continue;
 		const bool bDropMine = drop == SemanticMerge::DuplicateDrop::Mine;

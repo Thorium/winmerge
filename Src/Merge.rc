@@ -5631,6 +5631,8 @@ BEGIN
     IDS_SEMANTIC_MERGE_STRING_62 "Token merge"
     IDS_SEMANTIC_MERGE_STRING_63 "Token merge: %1 and %2 changed different parts of these lines"
     IDS_SEMANTIC_MERGE_STRING_64 "Tree-sitter data is not available for all panes."
+    IDS_SEMANTIC_MERGE_STRING_65 "The changing side also changed the lines of this definition outside the definition itself."
+    IDS_SEMANTIC_MERGE_STRING_66 "The other side's version of the definition already uses the new name."
 END
 
 // PLUGINS MENU

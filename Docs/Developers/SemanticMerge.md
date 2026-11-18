@@ -111,20 +111,30 @@ result twice.
 - **Applies when:**
   - the definition is absent from base;
   - it appears exactly once in mine and once in theirs;
-  - both copies have the same text and the same enclosing definition;
+  - both copies have the same text and the same enclosing definition (in a
+    layout-sensitive language the indentation inside the definition is part
+    of the text);
   - each copy is a pending one-sided addition that contains the whole
     definition.
 - **Result:** the addition that contains nothing the other one lacks is left
   out (taken from base). The other copy stays.
-- **Refuses:** different texts, different enclosing definitions, or neither
-  addition being a superset of the other.
+- **Refuses:**
+  - different texts, different enclosing definitions, or neither addition
+    being a superset of the other;
+  - leaving out a copy that a side put in place of base lines: taking the
+    base there would bring the removed lines back. The other side's copy is
+    left out instead when it holds nothing more.
 - **Code:** `ResolveDuplicateAdditionsInResult`, deciding with
   `ChooseDuplicateAdditionToDrop`.
 
 Within one conflict: when both additions land in the same conflict (base empty
-there) and one side's added lines appear whole and in the same order inside the
-other side's, the side with more is taken (`TryContainedAdditionToResult`,
-`ChooseContainedAdditionToDrop`). Two different additions stay a conflict.
+there) and one side's added lines appear whole, in the same order and at the
+same indentation inside the other side's, the side with more is taken
+(`TryContainedAdditionToResult`, `ChooseContainedAdditionToDrop`). Two
+different additions stay a conflict. So does a line that the other side put
+inside a block of its own (deeper indentation) or, in languages with a
+preprocessor, inside a conditional section it opened (`#if` … `#endif`): there
+the same line means something else.
 
 ### R2 Token merge
 
@@ -135,7 +145,9 @@ Both sides changed the same lines, but different words of them.
     tokens; a string literal and a line comment are one token each);
   - the two sides' changes touch different tokens.
 - **Result:** base with both sides' token changes applied. A side that only
-  re-wrapped or re-indented keeps its layout without conflicting.
+  re-wrapped or re-indented keeps its layout without conflicting: the white
+  space in front of a kept token is merged three ways as well, so a line
+  after the other side's change stays at the indentation it was given.
 - **Refuses:**
   - empty base (two additions at one place);
   - overlapping changes;
@@ -185,8 +197,13 @@ difference block.
 - **Applies when:** the definition (matched by name) is identical in base and
   in one side, and differs in the other side.
 - **Result:** the changed side's definition text.
-- **Refuses:** the definition being changed on both sides (that is R2 or R5
-  territory), or the definition being missing from a pane.
+- **Refuses:**
+  - the definition being changed on both sides (that is R2 or R5 territory),
+    or the definition being missing from a pane;
+  - a changed side that also changed the definition's first or last line
+    outside the definition's range (a grammar can start the range after a
+    keyword such as `export`). The resolution accounts for whole lines, so
+    that change would be lost. R5 refuses the same.
 
 ### R5 Small change onto a refactored definition
 
@@ -202,8 +219,9 @@ other side made exactly one small change.
   - one identifier renamed with 2–4 occurrences, and the same count of the
     old name in the refactored version.
 - **Result:** the refactored definition with that one change replayed.
-- **Refuses:** any second difference on the small side, or a replay target
-  that is not unique.
+- **Refuses:** any second difference on the small side, a replay target that
+  is not unique, or a rename whose new name the refactored version already
+  uses (two names would become one).
 
 ### R6 Commented-out definition update
 
@@ -327,10 +345,13 @@ Baseline (2026-11-18, 395 files from 9 repositories):
 The manual triples, middle = base: `SemanticDuplicate3Way*` (R1),
 `SemanticMoved3Way*` (R3), `SemanticStringLiteral3Way*`,
 `SemanticParameter3Way*`, `SemanticIdentifier3Way*` (R5),
-`SemanticCommented3Way*` (R6), and two that no rule may touch:
+`SemanticCommented3Way*` (R6), `SemanticDuplicateReplaced3Way*` (R1 where one
+side put its copy in place of a base definition: that copy stays and the old
+definition does not come back), and three that no rule may touch:
 `SemanticAddition3Way*` (two different additions at one place: stays a
-conflict) and `SemanticSameName3Way*` (the same method added to two different
-classes: R1 must keep both).
+conflict), `SemanticSameName3Way*` (the same method added to two different
+classes: R1 must keep both) and `SemanticWrapped3Way*` (one side added a call,
+the other the same call inside an `if`: stays a conflict).
 
 ## 10. Status
 
@@ -357,6 +378,20 @@ Found on the way: R5's string literal check compared only the literals, so a
 side with other code changes plus one changed literal passed, and the other
 changes were lost. The check now requires that undoing the literal change
 gives the base text back.
+
+A later review found six more ways to a wrong merge, each reproduced with a
+small triple and now refused or merged correctly:
+
+- R2 and R3: a line after one side's change lost the indentation the other
+  side gave it (Python: it fell out of its block).
+- R5: a rename replayed onto a version that already used the new name.
+- R4 and R5: a change on the definition's first line in front of its range
+  (`export`) was dropped.
+- R1 in a conflict: a line that the other side wrapped in a block counted as
+  the same addition.
+- R1: leaving out a copy that replaced base lines brought those lines back.
+- R1: in Python, two definitions that differ only in indentation counted as
+  the same.
 
 Open:
 

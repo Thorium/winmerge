@@ -241,6 +241,13 @@ bool TryFindUniqueTagByName(const std::vector<TagRange>& tags, const std::string
 /** @brief The lines with spaces and tabs removed, blank lines left out: text compared as content, not layout. */
 std::vector<String> SqueezeNonBlankLines(const std::vector<String>& lines);
 
+/**
+ * @brief Like SqueezeNonBlankLines, with each line's indentation kept: text
+ * compared as content at a nesting depth.
+ * @param bRelative Leave out the indentation all the lines share.
+ */
+std::vector<String> IndentedNonBlankLines(const std::vector<String>& lines, bool bRelative);
+
 /** @brief Which side of a duplicate addition (R1) is left out. */
 enum class DuplicateDrop
 {
@@ -259,11 +266,14 @@ DuplicateDrop ChooseDuplicateAdditionToDrop(const std::vector<String>& mineLines
 
 /**
  * @brief R1 within one conflict: both sides added lines at the same place,
- * and one side's addition appears whole, in order, inside the other's.
- * @return The side whose addition holds the other's, None when neither does
- *         or when they are the same.
+ * and one side's addition appears whole, in order and at the same
+ * indentation, inside the other's.
+ * @return The side whose addition holds the other's, None when neither does,
+ *         when they are the same, or when the holding side opens a
+ *         preprocessor conditional around the other's lines.
  */
-DuplicateDrop ChooseContainedAdditionToDrop(const std::vector<String>& mineLines, const std::vector<String>& theirsLines);
+DuplicateDrop ChooseContainedAdditionToDrop(const std::vector<String>& mineLines, const std::vector<String>& theirsLines,
+	const LanguageTraits& traits);
 
 /** @brief Which side moved a definition (R3). */
 enum class MovedSide

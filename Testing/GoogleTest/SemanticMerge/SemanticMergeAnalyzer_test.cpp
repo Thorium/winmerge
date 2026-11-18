@@ -688,6 +688,88 @@ TEST(SemanticMergeAnalyzer, IdentifierRenameReplayOntoRefactoredSide)
 	EXPECT_EQ(String::npos, suggestion.replacementText.find(_T("score")));
 }
 
+TEST(SemanticMergeAnalyzer, RenameOntoAVersionThatUsesTheNewNameIsRejected)
+{
+	std::vector<String> base = {
+		_T("int Calc(int value)"),
+		_T("{"),
+		_T("\tint score = value;"),
+		_T("\tscore += 2;"),
+		_T("\treturn score;"),
+		_T("}"),
+	};
+	std::vector<String> renamed = {
+		_T("int Calc(int value)"),
+		_T("{"),
+		_T("\tint total = value;"),
+		_T("\ttotal += 2;"),
+		_T("\treturn total;"),
+		_T("}"),
+	};
+	// "total" is another variable here; the rename would merge the two
+	std::vector<String> refactored = {
+		_T("int Calc(int value)"),
+		_T("{"),
+		_T("\tconst int total = 2;"),
+		_T("\tint score = value;"),
+		_T("\tscore += total;"),
+		_T("\treturn score;"),
+		_T("}"),
+	};
+
+	ThreeWayFixture fx(renamed, base, refactored);
+	auto analyzer = fx.MakeAnalyzer();
+	SemanticMerge::Suggestion suggestion;
+	String message;
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(2, 5), suggestion, message));
+	EXPECT_FALSE(message.empty());
+}
+
+TEST(SemanticMergeAnalyzer, ChangeOutsideTheDefinitionRangeOnItsLinesIsRejected)
+{
+	std::vector<String> base = {
+		_T("int Load(int value)"),
+		_T("{"),
+		_T("\treturn Read(value, \"utf8\");"),
+		_T("}"),
+	};
+	// the definition's range starts after the keyword, as some grammars report it
+	std::vector<String> exported = {
+		_T("export int Load(int value)"),
+		_T("{"),
+		_T("\treturn Read(value, \"utf-8\");"),
+		_T("}"),
+	};
+	std::vector<String> refactored = {
+		_T("int Load(int value)"),
+		_T("{"),
+		_T("\tif (value < 0)"),
+		_T("\t\treturn 0;"),
+		_T("\treturn Read(value, \"utf8\");"),
+		_T("}"),
+	};
+	SemanticMerge::Suggestion suggestion;
+	String message;
+
+	// R5: the literal change would be replayed and the keyword lost
+	ThreeWayFixture fx(exported, base, refactored);
+	ASSERT_EQ(1u, fx.m_panes[0].tags.size());
+	fx.m_panes[0].tags[0].startChar = 7;
+	EXPECT_FALSE(fx.MakeAnalyzer().TryBuildSuggestion(MakeDiff(0, 4), suggestion, message));
+	EXPECT_FALSE(message.empty());
+
+	// R4: the same with the other side unchanged
+	ThreeWayFixture fx2(exported, base, base);
+	fx2.m_panes[0].tags[0].startChar = 7;
+	EXPECT_FALSE(fx2.MakeAnalyzer().TryBuildSuggestion(MakeDiff(0, 3), suggestion, message));
+
+	// without the keyword the literal change is replayed
+	exported[0] = base[0];
+	ThreeWayFixture fx3(exported, base, refactored);
+	ASSERT_TRUE(fx3.MakeAnalyzer().TryBuildSuggestion(MakeDiff(0, 4), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(SemanticMerge::SuggestionKind::StringLiteral, suggestion.kind);
+}
+
 TEST(SemanticMergeAnalyzer, BothSidesChangedSameDefinitionIsRejected)
 {
 	ThreeWayFixture fx(
@@ -948,15 +1030,56 @@ TEST(SemanticMergeDecisions, ContainedAdditionKeepsTheSideThatHasMore)
 	helperAndMore.push_back(_T(""));
 	helperAndMore.push_back(_T("int More() { return 2; }"));
 
-	EXPECT_EQ(SemanticMerge::DuplicateDrop::Theirs, SemanticMerge::ChooseContainedAdditionToDrop(helperAndMore, helper));
-	EXPECT_EQ(SemanticMerge::DuplicateDrop::Mine, SemanticMerge::ChooseContainedAdditionToDrop(helper, helperAndMore));
+	const SemanticMerge::LanguageTraits cpp = SemanticMerge::TraitsForLanguage(_T("cpp"));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Theirs, SemanticMerge::ChooseContainedAdditionToDrop(helperAndMore, helper, cpp));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Mine, SemanticMerge::ChooseContainedAdditionToDrop(helper, helperAndMore, cpp));
 	// the same addition, or two different ones: not this rule
-	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(helper, helper));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(helper, helper, cpp));
 	const std::vector<String> other = { _T("int Other()"), _T("{"), _T("\treturn 3;"), _T("}") };
-	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(helper, other));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(helper, other, cpp));
 	// the lines must appear in the same order
 	const std::vector<String> reordered = { _T("int Helper()"), _T("/// The helper"), _T("{"), _T("\treturn 1;"), _T("}"), _T("int More() { return 2; }") };
-	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(reordered, helper));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(reordered, helper, cpp));
+}
+
+TEST(SemanticMergeDecisions, ContainedAdditionMustSitAtTheSameDepth)
+{
+	const SemanticMerge::LanguageTraits cpp = SemanticMerge::TraitsForLanguage(_T("cpp"));
+	const std::vector<String> call = { _T("    log(\"x\");") };
+	// the other side made the call conditional: not the same addition
+	const std::vector<String> guarded = { _T("    if (debug)"), _T("    {"), _T("        log(\"x\");"), _T("    }") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(call, guarded, cpp));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(guarded, call, cpp));
+	const std::vector<String> conditional = { _T("#ifdef DEBUG"), _T("    log(\"x\");"), _T("#endif") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(call, conditional, cpp));
+	// a closed conditional in front of the call, or a directive that is not one, does not change what the call means
+	const std::vector<String> afterConditional = { _T("#if DEBUG"), _T("    trace();"), _T("#endif"), _T("    log(\"x\");") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Mine, SemanticMerge::ChooseContainedAdditionToDrop(call, afterConditional, cpp));
+	const std::vector<String> include = { _T("#include \"b.h\"") };
+	const std::vector<String> includes = { _T("#include \"a.h\""), _T("#include \"b.h\"") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Theirs, SemanticMerge::ChooseContainedAdditionToDrop(includes, include, cpp));
+	// the same call with another one after it, at the same depth
+	const std::vector<String> callAndMore = { _T("    log(\"x\");"), _T("    log(\"y\");") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Mine, SemanticMerge::ChooseContainedAdditionToDrop(call, callAndMore, cpp));
+	// "#" starts a comment in Python
+	const SemanticMerge::LanguageTraits python = SemanticMerge::TraitsForLanguage(_T("python"));
+	const std::vector<String> pyCall = { _T("    log(\"x\")") };
+	const std::vector<String> pyCommented = { _T("    # note"), _T("    log(\"x\")") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Mine, SemanticMerge::ChooseContainedAdditionToDrop(pyCall, pyCommented, python));
+}
+
+TEST(SemanticMergeDecisions, IndentedNonBlankLinesKeepTheDepth)
+{
+	const std::vector<String> inside = { _T("    for x in xs:"), _T("        t += x"), _T(""), _T("        print( t )") };
+	const std::vector<String> after = { _T("    for x in xs:"), _T("        t += x"), _T("    print(t)") };
+	EXPECT_EQ(SemanticMerge::SqueezeNonBlankLines(inside), SemanticMerge::SqueezeNonBlankLines(after));
+	EXPECT_NE(SemanticMerge::IndentedNonBlankLines(inside, true), SemanticMerge::IndentedNonBlankLines(after, true));
+	// relative: the same lines one level deeper compare equal
+	const std::vector<String> deeper = { _T("        for x in xs:"), _T("            t += x"), _T("        print(t)") };
+	EXPECT_EQ(SemanticMerge::IndentedNonBlankLines(after, true), SemanticMerge::IndentedNonBlankLines(deeper, true));
+	EXPECT_NE(SemanticMerge::IndentedNonBlankLines(after, false), SemanticMerge::IndentedNonBlankLines(deeper, false));
+	const std::vector<String> expected = { _T("forxinxs:"), _T("    t+=x"), _T("print(t)") };
+	EXPECT_EQ(expected, SemanticMerge::IndentedNonBlankLines(after, true));
 }
 
 TEST(SemanticMergeDecisions, MovedDefinitionIsTheSideAwayFromTheBasePosition)
@@ -1095,6 +1218,17 @@ TEST(TokenMerge, IndentationChangeAndNewLineConflictWhereLayoutMatters)
 	const String ours = _T("if x:\n    if y:\n        a = 1\n        b = 2\n");
 	const String theirs = _T("if x:\n    a = 1\n    c = 3\n    b = 2\n");
 	EXPECT_EQ(_T("<conflict>"), TokenMerge(base, ours, theirs, _T("python")));
+}
+
+TEST(TokenMerge, ReindentedLinesStayInTheirBlockWhereLayoutMatters)
+{
+	// theirs put the lines under an if; ours changed a value in the first one
+	EXPECT_EQ(_T("if c:\n    x = 10\n    y = 2\n"),
+		TokenMerge(_T("x = 1\ny = 2\n"), _T("x = 10\ny = 2\n"), _T("if c:\n    x = 1\n    y = 2\n"), _T("python")));
+	// ours deleted the middle line
+	EXPECT_EQ(_T("if k:\n    a = 1\n    c = 3\n"),
+		TokenMerge(_T("a = 1\nb = 2\nc = 3\n"), _T("a = 1\nc = 3\n"),
+			_T("if k:\n    a = 1\n    b = 2\n    c = 3\n"), _T("python")));
 }
 
 TEST(TokenMerge, EditsMergeWhereLayoutMatters)

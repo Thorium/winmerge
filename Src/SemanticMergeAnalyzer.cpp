@@ -89,6 +89,24 @@ bool GetDefinitionText(const ITextSource& src, const TagRange& tag, String& text
 	return true;
 }
 
+/**
+ * @brief What the first and the last line of a definition hold outside its
+ * range, white space removed. The tag must be valid for the text.
+ */
+String GetDefinitionMargins(const ITextSource& src, const TagRange& tag)
+{
+	String before, after;
+	if (tag.startChar > 0)
+		src.GetTextRange(tag.startLine, 0, tag.startLine, tag.startChar, before);
+	const int endLength = src.GetLineLength(tag.endLine);
+	if (tag.endChar < endLength)
+		src.GetTextRange(tag.endLine, tag.endChar, tag.endLine, endLength, after);
+	String margins = before + _T('\n') + after;
+	margins.erase(std::remove_if(margins.begin(), margins.end(),
+		[](tchar_t ch) { return ch == _T(' ') || ch == _T('\t') || ch == _T('\r'); }), margins.end());
+	return margins;
+}
+
 bool GetLineRangeText(const ITextSource& src, int startLine, int endLine, String& text)
 {
 	if (startLine < 0 || endLine < startLine || endLine >= src.GetLineCount())
@@ -722,9 +740,24 @@ bool Analyzer::FinalizeStandardSuggestion(Suggestion& suggestion, String& messag
 		return false;
 	}
 
+	// The resolution accounts for the changed side's whole definition lines,
+	// so that side must have left the rest of those lines as the base has them
+	// (a grammar can start the definition after a keyword such as "export")
+	const String baseMargins = GetDefinitionMargins(*m_panes[b].pText, suggestion.defs[b].tag);
+	auto changedOnlyTheDefinition = [&](int pane)
+	{
+		return GetDefinitionMargins(*m_panes[pane].pText, suggestion.defs[pane].tag) == baseMargins;
+	};
+	const String marginsMessage = _("The changing side also changed the lines of this definition outside the definition itself.");
+
 	// R4: only one side changed the definition
 	if (bMineChanged != bTheirsChanged)
 	{
+		if (!changedOnlyTheDefinition(bMineChanged ? m : t))
+		{
+			message = marginsMessage;
+			return false;
+		}
 		suggestion.kind = SuggestionKind::DefinitionChange;
 		suggestion.changedPane = bMineChanged ? m : t;
 		suggestion.anchorPane = b;
@@ -761,8 +794,19 @@ bool Analyzer::FinalizeStandardSuggestion(Suggestion& suggestion, String& messag
 		else
 			continue;
 
+		if (!changedOnlyTheDefinition(localized))
+		{
+			replayMessage = marginsMessage;
+			continue;
+		}
 		String replayed;
 		const String& refactoredText = suggestion.defs[refactored].text;
+		// a rename onto a version that already uses the new name would merge two names into one
+		if (kind != SuggestionKind::StringLiteral && !FindWholeWordOccurrences(refactoredText, newToken).empty())
+		{
+			replayMessage = _("The other side's version of the definition already uses the new name.");
+			continue;
+		}
 		const bool bReplayed = kind == SuggestionKind::StringLiteral ?
 			ReplaceUniqueStringLiteral(refactoredText, oldToken, newToken, replayed) :
 			ReplaceWholeWordOccurrences(refactoredText, oldToken, newToken, occurrences, replayed);
@@ -1197,7 +1241,16 @@ bool MergeTokensThreeWay(const String& baseText, const String& oursText, const S
 	bool multiLineChange[3] = { false, false, false };
 	int lastTakenSide = 0; // side whose change was emitted just before, 0 for none
 
-	// A token all three sides have keeps the layout of the side that changed it
+	// White space is merged three ways as well: the side that changed it
+	// wins; where both did, the side whose change was emitted just before
+	auto mergeSpace = [&](const String& baseSpace, const String& oursSpace, const String& theirsSpace) -> const String&
+	{
+		if (oursSpace == baseSpace)
+			return theirsSpace;
+		if (theirsSpace == baseSpace)
+			return oursSpace;
+		return lastTakenSide == 2 ? theirsSpace : oursSpace;
+	};
 	auto emitStable = [&](size_t o, size_t a, size_t b)
 	{
 		const String& baseSpace = tokens[0][o].space;
@@ -1209,9 +1262,7 @@ bool MergeTokensThreeWay(const String& baseText, const String& oursText, const S
 			if (sideSpace != baseSpace && (HasLineBreak(sideSpace) || HasLineBreak(baseSpace)))
 				layoutChanged[side] = true;
 		}
-		const String& space = lastTakenSide == 1 ? oursSpace : lastTakenSide == 2 ? theirsSpace :
-			(oursSpace != baseSpace ? oursSpace : theirsSpace);
-		out.push_back({ &tokens[1][a], space });
+		out.push_back({ &tokens[1][a], mergeSpace(baseSpace, oursSpace, theirsSpace) });
 		lastTakenSide = 0;
 	};
 	// A changed stretch comes with its own layout, except in front: where
@@ -1274,8 +1325,7 @@ bool MergeTokensThreeWay(const String& baseText, const String& oursText, const S
 		a = aEnd + 1;
 		b = bEnd + 1;
 	}
-	const String& trailingSpace = lastTakenSide == 1 ? trailing[1] : lastTakenSide == 2 ? trailing[2] :
-		(trailing[1] != trailing[0] ? trailing[1] : trailing[2]);
+	const String& trailingSpace = mergeSpace(trailing[0], trailing[1], trailing[2]);
 
 	// Both sides bringing in the same word in different places is most
 	// likely the same change made twice; applying both would double it
@@ -1344,14 +1394,71 @@ DuplicateDrop ChooseDuplicateAdditionToDrop(const std::vector<String>& mineLines
 	return DuplicateDrop::None;
 }
 
-DuplicateDrop ChooseContainedAdditionToDrop(const std::vector<String>& mineLines, const std::vector<String>& theirsLines)
+std::vector<String> IndentedNonBlankLines(const std::vector<String>& lines, bool bRelative)
 {
-	const std::vector<String> mine = SqueezeNonBlankLines(mineLines);
-	const std::vector<String> theirs = SqueezeNonBlankLines(theirsLines);
-	auto contains = [](const std::vector<String>& outer, const std::vector<String>& inner)
+	std::vector<String> indents, indented;
+	for (const String& line : lines)
 	{
-		return !inner.empty() && inner.size() < outer.size() &&
-			std::search(outer.begin(), outer.end(), inner.begin(), inner.end()) != outer.end();
+		size_t nIndent = 0;
+		while (nIndent < line.length() && (line[nIndent] == _T(' ') || line[nIndent] == _T('\t')))
+			++nIndent;
+		const std::vector<String> squeezed = SqueezeNonBlankLines({ line.substr(nIndent) });
+		if (squeezed.empty())
+			continue;
+		indents.push_back(line.substr(0, nIndent));
+		indented.push_back(squeezed[0]);
+	}
+	size_t nCommon = 0;
+	if (bRelative && !indents.empty())
+	{
+		nCommon = indents[0].length();
+		for (const String& indent : indents)
+		{
+			size_t n = 0;
+			while (n < nCommon && n < indent.length() && indent[n] == indents[0][n])
+				++n;
+			nCommon = n;
+		}
+	}
+	for (size_t i = 0; i < indented.size(); ++i)
+		indented[i] = indents[i].substr(nCommon) + indented[i];
+	return indented;
+}
+
+DuplicateDrop ChooseContainedAdditionToDrop(const std::vector<String>& mineLines, const std::vector<String>& theirsLines,
+	const LanguageTraits& traits)
+{
+	// A line that the other side put inside a block or a conditional section
+	// of its own is not the same addition: the lines must sit at the same
+	// depth, and what the outer addition has in front of them must not
+	// leave a preprocessor conditional open or switch its branch
+	const std::vector<String> mine = IndentedNonBlankLines(mineLines, false);
+	const std::vector<String> theirs = IndentedNonBlankLines(theirsLines, false);
+	auto startsConditional = [&](const std::vector<String>& outer, size_t nCount)
+	{
+		int nDepth = 0;
+		bool bSwitched = false;
+		for (size_t i = 0; i < nCount; ++i)
+		{
+			const size_t nFirst = outer[i].find_first_not_of(_T(" \t"));
+			if (nFirst == String::npos || outer[i][nFirst] != _T('#'))
+				continue;
+			if (outer[i].compare(nFirst, 3, _T("#if")) == 0)
+				++nDepth;
+			else if (outer[i].compare(nFirst, 6, _T("#endif")) == 0)
+				--nDepth;
+			else if (outer[i].compare(nFirst, 3, _T("#el")) == 0)
+				bSwitched = bSwitched || nDepth == 0;
+		}
+		return nDepth != 0 || bSwitched;
+	};
+	auto contains = [&](const std::vector<String>& outer, const std::vector<String>& inner)
+	{
+		if (inner.empty() || inner.size() >= outer.size())
+			return false;
+		const auto found = std::search(outer.begin(), outer.end(), inner.begin(), inner.end());
+		return found != outer.end() &&
+			!(traits.preprocessorLines && startsConditional(outer, static_cast<size_t>(found - outer.begin())));
 	};
 	if (contains(mine, theirs))
 		return DuplicateDrop::Theirs;

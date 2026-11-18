@@ -157,7 +157,7 @@ MergeCmdLineInfo::MergeCmdLineInfo(const tchar_t* q)
 	, m_bSelfCompare(false)
 	, m_bClipboardCompare(false)
 	, m_bNewCompare(false)
-	, m_bForceSemanticMergeForThisRun(false)
+	, m_bSemanticMerge(false)
 	, m_dwLeftFlags(FFILEOPEN_NONE)
 	, m_dwMiddleFlags(FFILEOPEN_NONE)
 	, m_dwRightFlags(FFILEOPEN_NONE)
@@ -556,23 +556,10 @@ void MergeCmdLineInfo::ParseWinMergeCmdLine(const tchar_t *q)
 			// -ar to auto-merge at the right pane
 			m_dwRightFlags |= FFILEOPEN_AUTOMERGE;
 		}
-		else if (param == _T("sml"))
+		else if (param == _T("semantic"))
 		{
-			// -sml to semantic auto-merge at the left pane
-			m_bForceSemanticMergeForThisRun = true;
-			m_dwLeftFlags |= FFILEOPEN_SEMANTIC_AUTOMERGE;
-		}
-		else if (param == _T("smm"))
-		{
-			// -smm to semantic auto-merge at the middle pane
-			m_bForceSemanticMergeForThisRun = true;
-			m_dwMiddleFlags |= FFILEOPEN_SEMANTIC_AUTOMERGE;
-		}
-		else if (param == _T("smr"))
-		{
-			// -smr to semantic auto-merge at the right pane
-			m_bForceSemanticMergeForThisRun = true;
-			m_dwRightFlags |= FFILEOPEN_SEMANTIC_AUTOMERGE;
+			// -semantic turns semantic conflict resolution on for this run (with -al/-am/-ar)
+			m_bSemanticMerge = true;
 		}
 		else if (param == _T("x"))
 		{

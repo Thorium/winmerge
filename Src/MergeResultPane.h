@@ -37,8 +37,6 @@ enum class SemanticRule
 	DefinitionChange,    /**< R4: only one side changed the definition */
 	LocalizedChange,     /**< R5: one small change replayed onto a refactored definition */
 	CommentedOut,        /**< R6: commented-out definition updated with the other side's edit */
-	DefinitionAddition,  /**< Analyzer insertion suggestion; outside the specified pipeline */
-	AgreedVersion,       /**< Analyzer adopt-agreed suggestion; outside the specified pipeline */
 };
 
 /** @brief Short display name of a rule, e.g. "Moved definition". */
@@ -115,7 +113,7 @@ struct SemanticResolutionSnapshot
 /** @brief Semantic resolutions per rule, for the Auto Merge report. */
 struct SemanticResolutionCounts
 {
-	int counts[static_cast<int>(SemanticRule::AgreedVersion) + 1] = {};
+	int counts[static_cast<int>(SemanticRule::CommentedOut) + 1] = {};
 	int Total() const
 	{
 		int nTotal = 0;

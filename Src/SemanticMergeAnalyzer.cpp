@@ -76,14 +76,6 @@ LanguageTraits TraitsForLanguage(const String& languageName)
 // Helpers below have external linkage; the subset declared in the header is
 // exposed for unit testing, the rest is internal to the analyzer.
 
-enum class LocalizedReplayKind
-{
-	None,
-	StringLiteral,
-	ParameterRename,
-	IdentifierRename,
-};
-
 bool GetDefinitionText(const ITextSource& src, const TagRange& tag, String& text)
 {
 	if (tag.startLine < 0 || tag.endLine < tag.startLine || tag.endLine >= src.GetLineCount())
@@ -354,6 +346,11 @@ bool ExtractSingleStringLiteralChange(const String& unchangedText, const String&
 	}
 
 	if (removed.size() != 1 || added.size() != 1)
+		return false;
+
+	// the literal must be the only change: putting the old one back gives the unchanged text
+	String revertedText;
+	if (!ReplaceUniqueStringLiteral(changedText, added[0], removed[0], revertedText) || revertedText != unchangedText)
 		return false;
 
 	oldLiteralWithQuotes = removed[0];
@@ -674,45 +671,11 @@ bool TryFindUniqueTagByName(const std::vector<TagRange>& tags, const std::string
 	return any;
 }
 
-bool HaveSameDestinationDefinition(const Suggestion& left, const Suggestion& right, int dstPane)
-{
-	if (left.insertOnly || right.insertOnly)
-	{
-		return left.insertOnly == right.insertOnly &&
-			left.insertLine == right.insertLine &&
-			left.insertChar == right.insertChar;
-	}
-
-	const auto& leftTag = left.defs[dstPane].tag;
-	const auto& rightTag = right.defs[dstPane].tag;
-	return leftTag.startLine == rightTag.startLine &&
-		leftTag.startChar == rightTag.startChar &&
-		leftTag.endLine == rightTag.endLine &&
-		leftTag.endChar == rightTag.endChar;
-}
-
-bool CompareSuggestionsByDescendingDestination(const Suggestion& left, const Suggestion& right, int dstPane)
-{
-	if (left.insertOnly != right.insertOnly)
-		return left.insertOnly;
-	if (left.insertOnly && right.insertOnly)
-	{
-		if (left.insertLine != right.insertLine)
-			return left.insertLine > right.insertLine;
-		return left.insertChar > right.insertChar;
-	}
-
-	const auto& leftTag = left.defs[dstPane].tag;
-	const auto& rightTag = right.defs[dstPane].tag;
-	if (leftTag.startLine != rightTag.startLine)
-		return leftTag.startLine > rightTag.startLine;
-	return leftTag.startChar > rightTag.startChar;
-}
-
-Analyzer::Analyzer(const PaneData* panes, int nPanes, const LanguageTraits& traits)
+Analyzer::Analyzer(const PaneData* panes, int nPanes, const LanguageTraits& traits, const MergeRoles& roles)
 	: m_panes(panes)
 	, m_nPanes(nPanes)
 	, m_traits(traits)
+	, m_roles(roles)
 {
 }
 
@@ -726,116 +689,14 @@ bool Analyzer::AllPanesHaveLanguage() const
 	return m_nPanes > 0;
 }
 
-bool Analyzer::TryBuildInsertionSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion) const
+bool Analyzer::RolesAreValid() const
 {
-	if (dstPane != 1)
-		return false;
-	if (diff.op != OP_1STONLY && diff.op != OP_3RDONLY)
-		return false;
-
-	const int addedPane = (diff.op == OP_1STONLY) ? 0 : 2;
-	const std::vector<TagRange>& addedTags = m_panes[addedPane].tags;
-	const std::vector<TagRange>& middleTags = m_panes[1].tags;
-	if (addedTags.empty() || middleTags.empty())
-		return false;
-
-	std::vector<TagRange> addedCandidates;
-	for (const auto& tag : addedTags)
-	{
-		if (GetOverlapLength(tag, diff.dbegin, diff.dend) > 0)
-			addedCandidates.push_back(tag);
-	}
-	if (addedCandidates.size() != 1)
-		return false;
-
-	const auto& addedTag = addedCandidates[0];
-	for (const auto& tag : middleTags)
-	{
-		if (tag.name == addedTag.name)
-			return false;
-	}
-
-	String addedText;
-	if (!GetDefinitionText(*m_panes[addedPane].pText, addedTag, addedText))
-		return false;
-
-	const TagRange* prevAddedTag = nullptr;
-	const TagRange* nextAddedTag = nullptr;
-	for (const auto& tag : addedTags)
-	{
-		if (tag.endLine < addedTag.startLine)
-		{
-			if (!prevAddedTag || tag.endLine > prevAddedTag->endLine)
-				prevAddedTag = &tag;
-		}
-		else if (tag.startLine > addedTag.endLine)
-		{
-			if (!nextAddedTag || tag.startLine < nextAddedTag->startLine)
-				nextAddedTag = &tag;
-		}
-	}
-
-	const TagRange* prevMiddleTag = nullptr;
-	const TagRange* nextMiddleTag = nullptr;
-	if (prevAddedTag)
-	{
-		for (const auto& tag : middleTags)
-		{
-			if (tag.name == prevAddedTag->name)
-			{
-				prevMiddleTag = &tag;
-				break;
-			}
-		}
-	}
-	if (nextAddedTag)
-	{
-		for (const auto& tag : middleTags)
-		{
-			if (tag.name == nextAddedTag->name)
-			{
-				nextMiddleTag = &tag;
-				break;
-			}
-		}
-	}
-
-	if (!prevMiddleTag && !nextMiddleTag)
-		return false;
-
-	int insertLine = 0;
-	int insertChar = 0;
-	String insertedText = addedText;
-	if (nextMiddleTag)
-	{
-		insertLine = nextMiddleTag->startLine;
-		insertChar = nextMiddleTag->startChar;
-		insertedText += _T("\n");
-	}
-	else
-	{
-		insertLine = prevMiddleTag->endLine;
-		insertChar = prevMiddleTag->endChar;
-		insertedText = _T("\n") + insertedText;
-	}
-
-	suggestion.kind = SuggestionKind::Insertion;
-	suggestion.changedPane = addedPane;
-	suggestion.defs[addedPane].pane = addedPane;
-	suggestion.defs[addedPane].tag = addedTag;
-	suggestion.defs[addedPane].text = addedText;
-	suggestion.insertedDefs.push_back(suggestion.defs[addedPane]);
-	suggestion.defs[dstPane].pane = dstPane;
-	suggestion.displayName = ucr::toTString(addedTag.name);
-	suggestion.insertOnly = true;
-	suggestion.insertLine = insertLine;
-	suggestion.insertChar = insertChar;
-	suggestion.replacementText = insertedText;
-	suggestion.previewText = insertedText;
-	return true;
+	const int b = m_roles.base, m = m_roles.mine, t = m_roles.theirs;
+	return b >= 0 && b < m_nPanes && m >= 0 && m < m_nPanes && t >= 0 && t < m_nPanes &&
+		b != m && b != t && m != t;
 }
 
-bool Analyzer::FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, String& message, bool allowAdoptAgreed /*= false*/) const
+bool Analyzer::FinalizeStandardSuggestion(Suggestion& suggestion, String& message) const
 {
 	for (int pane = 0; pane < m_nPanes; ++pane)
 	{
@@ -843,291 +704,139 @@ bool Analyzer::FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, S
 		suggestion.defs[pane].pane = pane;
 		if (!GetDefinitionText(*m_panes[pane].pText, suggestion.defs[pane].tag, suggestion.defs[pane].text))
 		{
-			message = _("Failed to extract the selected definition text for semantic merge.");
+			message = _("Failed to extract the definition text for semantic merge.");
 			return false;
 		}
 	}
 
-	if (suggestion.defs[0].text == suggestion.defs[1].text && suggestion.defs[0].text != suggestion.defs[2].text)
+	const int b = m_roles.base, m = m_roles.mine, t = m_roles.theirs;
+	const String& baseText = suggestion.defs[b].text;
+	const bool bMineChanged = suggestion.defs[m].text != baseText;
+	const bool bTheirsChanged = suggestion.defs[t].text != baseText;
+	suggestion.displayName = ucr::toTString(suggestion.tags[b].name);
+	suggestion.unchangedPane = b;
+
+	if (!bMineChanged && !bTheirsChanged)
 	{
-		suggestion.unchangedPane = 0;
-		suggestion.changedPane = 2;
-	}
-	else if (suggestion.defs[0].text == suggestion.defs[2].text && suggestion.defs[0].text != suggestion.defs[1].text)
-	{
-		suggestion.unchangedPane = 0;
-		suggestion.changedPane = 1;
-	}
-	else if (suggestion.defs[1].text == suggestion.defs[2].text && suggestion.defs[1].text != suggestion.defs[0].text)
-	{
-		suggestion.unchangedPane = 1;
-		suggestion.changedPane = 0;
-	}
-	else
-	{
-		int unchangedPane = -1;
-		int localizedChangePane = -1;
-		int refactoredPane = -1;
-		String oldToken;
-		String newToken;
-		size_t localizedOccurrenceCount = 0;
-		LocalizedReplayKind localizedReplayKind = LocalizedReplayKind::None;
-
-		for (int candidateUnchangedPane = 0; candidateUnchangedPane < m_nPanes; ++candidateUnchangedPane)
-		{
-			const int candidatePane1 = (candidateUnchangedPane + 1) % 3;
-			const int candidatePane2 = (candidateUnchangedPane + 2) % 3;
-
-			if (ExtractSingleStringLiteralChange(
-					suggestion.defs[candidateUnchangedPane].text,
-					suggestion.defs[candidatePane1].text,
-					m_traits.stringQuoteChars,
-					oldToken,
-					newToken))
-			{
-				localizedReplayKind = LocalizedReplayKind::StringLiteral;
-				localizedChangePane = candidatePane1;
-				refactoredPane = candidatePane2;
-			}
-			else if (m_traits.cStyleParameters && ExtractSingleParameterRenameChange(
-					suggestion.defs[candidateUnchangedPane].text,
-					suggestion.defs[candidatePane1].text,
-					oldToken,
-					newToken))
-			{
-				localizedReplayKind = LocalizedReplayKind::ParameterRename;
-				localizedChangePane = candidatePane1;
-				refactoredPane = candidatePane2;
-				localizedOccurrenceCount = 2;
-			}
-			else if (m_traits.identifierRename && ExtractSingleIdentifierRenameChange(
-					suggestion.defs[candidateUnchangedPane].text,
-					suggestion.defs[candidatePane1].text,
-					oldToken,
-					newToken,
-					localizedOccurrenceCount))
-			{
-				localizedReplayKind = LocalizedReplayKind::IdentifierRename;
-				localizedChangePane = candidatePane1;
-				refactoredPane = candidatePane2;
-			}
-			else if (ExtractSingleStringLiteralChange(
-					suggestion.defs[candidateUnchangedPane].text,
-					suggestion.defs[candidatePane2].text,
-					m_traits.stringQuoteChars,
-					oldToken,
-					newToken))
-			{
-				localizedReplayKind = LocalizedReplayKind::StringLiteral;
-				localizedChangePane = candidatePane2;
-				refactoredPane = candidatePane1;
-			}
-			else if (m_traits.cStyleParameters && ExtractSingleParameterRenameChange(
-					suggestion.defs[candidateUnchangedPane].text,
-					suggestion.defs[candidatePane2].text,
-					oldToken,
-					newToken))
-			{
-				localizedReplayKind = LocalizedReplayKind::ParameterRename;
-				localizedChangePane = candidatePane2;
-				refactoredPane = candidatePane1;
-				localizedOccurrenceCount = 2;
-			}
-			else if (m_traits.identifierRename && ExtractSingleIdentifierRenameChange(
-					suggestion.defs[candidateUnchangedPane].text,
-					suggestion.defs[candidatePane2].text,
-					oldToken,
-					newToken,
-					localizedOccurrenceCount))
-			{
-				localizedReplayKind = LocalizedReplayKind::IdentifierRename;
-				localizedChangePane = candidatePane2;
-				refactoredPane = candidatePane1;
-			}
-			else
-			{
-				continue;
-			}
-
-			unchangedPane = candidateUnchangedPane;
-			break;
-		}
-
-		if (unchangedPane == -1)
-		{
-			message = _("This definition does not have a single unchanged version plus a single changed version, so no safe semantic merge suggestion is available.");
-			return false;
-		}
-
-		if (dstPane != refactoredPane)
-		{
-			message = _("This suggestion only works when you apply it to the pane with the refactored version of the definition. The other changed pane must contain only one small semantic change, currently either a single string literal change, a single parameter rename with one matching use-site update, or one identifier rename with very few matching references.");
-			return false;
-		}
-
-		String replayedText;
-		bool replaySucceeded = false;
-		if (localizedReplayKind == LocalizedReplayKind::StringLiteral)
-		{
-			replaySucceeded = ReplaceUniqueStringLiteral(
-				suggestion.defs[refactoredPane].text,
-				oldToken,
-				newToken,
-				replayedText);
-		}
-		else if (localizedReplayKind == LocalizedReplayKind::ParameterRename)
-		{
-			replaySucceeded = ReplaceWholeWordOccurrences(
-				suggestion.defs[refactoredPane].text,
-				oldToken,
-				newToken,
-				2,
-				replayedText);
-		}
-		else if (localizedReplayKind == LocalizedReplayKind::IdentifierRename)
-		{
-			replaySucceeded = ReplaceWholeWordOccurrences(
-				suggestion.defs[refactoredPane].text,
-				oldToken,
-				newToken,
-				localizedOccurrenceCount,
-				replayedText);
-		}
-
-		if (!replaySucceeded)
-		{
-			message = _("The localized semantic update could not be mapped uniquely onto the destination definition.");
-			return false;
-		}
-
-		suggestion.kind = localizedReplayKind == LocalizedReplayKind::StringLiteral ? SuggestionKind::StringLiteral :
-			localizedReplayKind == LocalizedReplayKind::ParameterRename ? SuggestionKind::ParameterRename :
-			SuggestionKind::IdentifierRename;
-		suggestion.unchangedPane = unchangedPane;
-		suggestion.changedPane = localizedChangePane;
-		suggestion.displayName = ucr::toTString(suggestion.tags[0].name);
-		suggestion.replacementText = replayedText;
-		suggestion.previewText = replayedText;
-		return true;
-	}
-
-	if (suggestion.defs[dstPane].text == suggestion.defs[suggestion.changedPane].text)
-	{
-		if (!allowAdoptAgreed)
-		{
-			message = _("The destination pane already contains the latest semantic definition text.");
-			return false;
-		}
-		// The destination holds the odd-one-out version while the two other
-		// panes agree: adopt their agreed definition (catching the pane up
-		// after an earlier copy, or explicitly reverting the change).
-		suggestion.kind = SuggestionKind::AgreedVersion;
-		suggestion.srcPane = suggestion.unchangedPane;
-		suggestion.displayName = ucr::toTString(suggestion.tags[0].name);
-		suggestion.replacementText = suggestion.defs[suggestion.unchangedPane].text;
-		suggestion.previewText = suggestion.replacementText;
-		return true;
-	}
-
-	if (suggestion.defs[dstPane].text != suggestion.defs[suggestion.unchangedPane].text)
-	{
-		message = _("Semantic merge suggestion is currently only available when the destination pane still has the unchanged definition text.");
+		message = _("The definition is the same in all panes.");
 		return false;
 	}
 
-	suggestion.kind = SuggestionKind::DefinitionChange;
-	suggestion.srcPane = suggestion.changedPane;
-	suggestion.displayName = ucr::toTString(suggestion.tags[0].name);
-	suggestion.replacementText = suggestion.defs[suggestion.changedPane].text;
-	suggestion.previewText = suggestion.defs[suggestion.changedPane].text;
-	return true;
+	// R4: only one side changed the definition
+	if (bMineChanged != bTheirsChanged)
+	{
+		suggestion.kind = SuggestionKind::DefinitionChange;
+		suggestion.changedPane = bMineChanged ? m : t;
+		suggestion.anchorPane = b;
+		suggestion.replacementText = suggestion.defs[suggestion.changedPane].text;
+		return true;
+	}
+
+	if (suggestion.defs[m].text == suggestion.defs[t].text)
+	{
+		message = _("Both sides changed the definition the same way.");
+		return false;
+	}
+
+	// R5: both changed it; one side made one small change, which is
+	// replayed onto the other side's version
+	String replayMessage;
+	for (const int localized : { m, t })
+	{
+		const int refactored = localized == m ? t : m;
+		const String& localizedText = suggestion.defs[localized].text;
+		String oldToken, newToken;
+		size_t occurrences = 0;
+		SuggestionKind kind;
+		if (ExtractSingleStringLiteralChange(baseText, localizedText, m_traits.stringQuoteChars, oldToken, newToken))
+			kind = SuggestionKind::StringLiteral;
+		else if (m_traits.cStyleParameters && ExtractSingleParameterRenameChange(baseText, localizedText, oldToken, newToken))
+		{
+			kind = SuggestionKind::ParameterRename;
+			occurrences = 2;
+		}
+		else if (m_traits.identifierRename &&
+			ExtractSingleIdentifierRenameChange(baseText, localizedText, oldToken, newToken, occurrences))
+			kind = SuggestionKind::IdentifierRename;
+		else
+			continue;
+
+		String replayed;
+		const String& refactoredText = suggestion.defs[refactored].text;
+		const bool bReplayed = kind == SuggestionKind::StringLiteral ?
+			ReplaceUniqueStringLiteral(refactoredText, oldToken, newToken, replayed) :
+			ReplaceWholeWordOccurrences(refactoredText, oldToken, newToken, occurrences, replayed);
+		if (!bReplayed)
+		{
+			replayMessage = _("The small change could not be mapped uniquely onto the other side's version of the definition.");
+			continue;
+		}
+		suggestion.kind = kind;
+		suggestion.changedPane = localized;
+		suggestion.anchorPane = refactored;
+		suggestion.replacementText = replayed;
+		return true;
+	}
+
+	message = !replayMessage.empty() ? replayMessage :
+		_("Both sides changed this definition, and neither change is one small change (a string literal, a parameter rename or an identifier rename).");
+	return false;
 }
 
-bool Analyzer::TryBuildCommentedBlockSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const
+bool Analyzer::TryBuildCommentedBlockSuggestion(int commentPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const
 {
-	// The destination pane holds the commented-out copy, so it has no tag for
-	// the definition. The two other panes must agree on the definition name:
-	// one still has the original text (matching the decommented block) and
-	// the other has the updated text to replay into the comment.
-	const int otherPane1 = (dstPane + 1) % 3;
-	const int otherPane2 = (dstPane + 2) % 3;
-	if (!TryFindBestTagForDiff(m_panes[otherPane1].tags, diff.dbegin, diff.dend, suggestion.tags[otherPane1]) ||
-		!TryFindBestTagForDiff(m_panes[otherPane2].tags, diff.dbegin, diff.dend, suggestion.tags[otherPane2]))
+	// The commenting side has no tag for the definition at the diff; base
+	// and the editing side both have it, under the same name.
+	const int b = m_roles.base;
+	const int editor = commentPane == m_roles.mine ? m_roles.theirs : m_roles.mine;
+	if (!TryFindBestTagForDiff(m_panes[b].tags, diff.dbegin, diff.dend, suggestion.tags[b]) ||
+		!TryFindBestTagForDiff(m_panes[editor].tags, diff.dbegin, diff.dend, suggestion.tags[editor]))
 	{
-		message = _("No matching top-level definition was found for the selected difference in all three panes.");
+		message = _("No matching definition was found for the difference in base and the editing side.");
+		return false;
+	}
+	if (suggestion.tags[b].name != suggestion.tags[editor].name)
+	{
+		message = _("The difference maps to different definitions across panes.");
 		return false;
 	}
 
-	if (suggestion.tags[otherPane1].name != suggestion.tags[otherPane2].name)
+	String baseText, editorText, commentedBlockText;
+	if (!GetDefinitionText(*m_panes[b].pText, suggestion.tags[b], baseText) ||
+		!GetDefinitionText(*m_panes[editor].pText, suggestion.tags[editor], editorText) ||
+		!GetLineRangeText(*m_panes[commentPane].pText, diff.dbegin, diff.dend, commentedBlockText))
 	{
-		message = _("The selected difference maps to different definitions across panes, so no safe semantic merge suggestion is available.");
-		return false;
-	}
-
-	String text1;
-	String text2;
-	if (!GetDefinitionText(*m_panes[otherPane1].pText, suggestion.tags[otherPane1], text1) ||
-		!GetDefinitionText(*m_panes[otherPane2].pText, suggestion.tags[otherPane2], text2))
-	{
-		message = _("Failed to extract the selected definition text for semantic merge.");
-		return false;
-	}
-
-	String commentedBlockText;
-	if (!GetLineRangeText(*m_panes[dstPane].pText, diff.dbegin, diff.dend, commentedBlockText))
-	{
-		message = _("Failed to extract the commented-out block for semantic merge.");
+		message = _("Failed to extract the definition text for semantic merge.");
 		return false;
 	}
 
 	CommentedBlockInfo commentInfo;
 	if (!TryParseLineCommentedBlock(commentedBlockText, m_traits.lineCommentPrefixes, commentInfo))
 	{
-		message = _("No matching top-level definition was found for the selected difference in all three panes.");
+		message = _("The block is not a line-commented definition.");
+		return false;
+	}
+	if (NormalizeSemanticText(baseText) == NormalizeSemanticText(editorText))
+	{
+		message = _("The other side did not change the commented-out definition.");
+		return false;
+	}
+	if (NormalizeSemanticText(commentInfo.decommentedText) != NormalizeSemanticText(baseText))
+	{
+		message = _("The commented-out block does not match the base version of the definition.");
 		return false;
 	}
 
-	const String normalizedCommented = NormalizeSemanticText(commentInfo.decommentedText);
-	const String normalized1 = NormalizeSemanticText(text1);
-	const String normalized2 = NormalizeSemanticText(text2);
+	// The commenting side has no tag: its target is the commented block
+	TagRange commentRange{};
+	commentRange.name = suggestion.tags[b].name;
+	commentRange.startLine = diff.dbegin;
+	commentRange.startChar = 0;
+	commentRange.endLine = diff.dend;
+	commentRange.endChar = m_panes[commentPane].pText->GetLineLength(diff.dend);
+	suggestion.tags[commentPane] = commentRange;
 
-	if (normalized1 == normalized2)
-	{
-		message = _("The destination pane already contains the latest semantic definition text.");
-		return false;
-	}
-
-	int unchangedPane;
-	int changedPane;
-	if (normalizedCommented == normalized1)
-	{
-		unchangedPane = otherPane1;
-		changedPane = otherPane2;
-	}
-	else if (normalizedCommented == normalized2)
-	{
-		unchangedPane = otherPane2;
-		changedPane = otherPane1;
-	}
-	else
-	{
-		message = _("The destination block looks commented out, but it does not match the unchanged function text closely enough for a safe semantic update.");
-		return false;
-	}
-
-	const String& changedText = (changedPane == otherPane1) ? text1 : text2;
-
-	// The destination has no tag, so the replacement target is the commented
-	// block itself: the full diff line range, excluding the final EOL.
-	TagRange dstRange{};
-	dstRange.name = suggestion.tags[unchangedPane].name;
-	dstRange.startLine = diff.dbegin;
-	dstRange.startChar = 0;
-	dstRange.endLine = diff.dend;
-	dstRange.endChar = m_panes[dstPane].pText->GetLineLength(diff.dend);
-	suggestion.tags[dstPane] = dstRange;
-
-	String replacement = RenderLineCommentedBlock(changedText, commentInfo.linePrefix);
+	String replacement = RenderLineCommentedBlock(editorText, commentInfo.linePrefix);
 	while (!replacement.empty() && replacement.back() == _T('\n'))
 		replacement.pop_back();
 
@@ -1136,15 +845,16 @@ bool Analyzer::TryBuildCommentedBlockSuggestion(int dstPane, const DiffInfo& dif
 		suggestion.defs[pane].tag = suggestion.tags[pane];
 		suggestion.defs[pane].pane = pane;
 	}
-	suggestion.defs[unchangedPane].text = (unchangedPane == otherPane1) ? text1 : text2;
-	suggestion.defs[changedPane].text = changedText;
+	suggestion.defs[b].text = baseText;
+	suggestion.defs[editor].text = editorText;
+	suggestion.defs[commentPane].text = commentedBlockText;
 
 	suggestion.kind = SuggestionKind::CommentedOut;
-	suggestion.unchangedPane = unchangedPane;
-	suggestion.changedPane = changedPane;
-	suggestion.displayName = ucr::toTString(suggestion.tags[unchangedPane].name);
+	suggestion.unchangedPane = b;
+	suggestion.changedPane = editor;
+	suggestion.anchorPane = commentPane;
+	suggestion.displayName = ucr::toTString(suggestion.tags[b].name);
 	suggestion.replacementText = replacement;
-	suggestion.previewText = replacement;
 	return true;
 }
 
@@ -1176,7 +886,7 @@ std::vector<std::string> Analyzer::CollectCandidateDefinitionNames(const DiffInf
 	return names;
 }
 
-bool Analyzer::TryReconcileTagsByName(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const
+bool Analyzer::TryReconcileTagsByName(const DiffInfo& diff, Suggestion& suggestion, String& message) const
 {
 	// The diff's line range may land in differently named definitions across
 	// panes when surrounding code has shifted or moved. Try each candidate
@@ -1197,7 +907,7 @@ bool Analyzer::TryReconcileTagsByName(int dstPane, const DiffInfo& diff, Suggest
 			trial.tags[pane] = reconciled[pane];
 
 		String trialMessage;
-		if (FinalizeStandardSuggestion(dstPane, trial, trialMessage, diff.allowAdoptAgreed))
+		if (FinalizeStandardSuggestion(trial, trialMessage))
 		{
 			suggestion = trial;
 			return true;
@@ -1211,21 +921,19 @@ bool Analyzer::TryReconcileTagsByName(int dstPane, const DiffInfo& diff, Suggest
 	return false;
 }
 
-bool Analyzer::TryBuildSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const
+bool Analyzer::TryBuildSuggestion(const DiffInfo& diff, Suggestion& suggestion, String& message) const
 {
 	message.clear();
 	if (m_nPanes != 3)
 	{
-		message = _("Semantic merge suggestions currently support only 3-way text comparisons.");
+		message = _("Semantic merge supports only 3-way comparisons.");
 		return false;
 	}
-
-	if (dstPane < 0 || dstPane >= m_nPanes)
+	if (!RolesAreValid())
 	{
-		message = _("The destination pane is read-only.");
+		message = _("The base and the two sides of the merge are not set.");
 		return false;
 	}
-
 	if (!AllPanesHaveLanguage())
 	{
 		message = _("Tree-sitter data is not available for all panes.");
@@ -1233,10 +941,11 @@ bool Analyzer::TryBuildSuggestion(int dstPane, const DiffInfo& diff, Suggestion&
 	}
 
 	bool foundAllTags = true;
+	bool foundTag[3] = { false, false, false };
 	for (int pane = 0; pane < m_nPanes; ++pane)
 	{
-		if (!TryFindBestTagForDiff(m_panes[pane].tags, diff.dbegin, diff.dend, suggestion.tags[pane]))
-			foundAllTags = false;
+		foundTag[pane] = TryFindBestTagForDiff(m_panes[pane].tags, diff.dbegin, diff.dend, suggestion.tags[pane]);
+		foundAllTags = foundAllTags && foundTag[pane];
 	}
 	const bool namesAgree = foundAllTags &&
 		suggestion.tags[0].name == suggestion.tags[1].name &&
@@ -1246,303 +955,38 @@ bool Analyzer::TryBuildSuggestion(int dstPane, const DiffInfo& diff, Suggestion&
 	{
 		// The anchor may point at a different definition inside the same
 		// diff block; prefer it when it yields a valid suggestion.
-		std::string anchorName;
 		TagRange anchorTag;
 		if (diff.anchorPane >= 0 && diff.anchorPane < m_nPanes && diff.anchorLine >= 0 &&
-			TryFindBestTagForDiff(m_panes[diff.anchorPane].tags, diff.anchorLine, diff.anchorLine, anchorTag))
-			anchorName = anchorTag.name;
-		if (!anchorName.empty() && anchorName != suggestion.tags[0].name)
+			TryFindBestTagForDiff(m_panes[diff.anchorPane].tags, diff.anchorLine, diff.anchorLine, anchorTag) &&
+			anchorTag.name != suggestion.tags[0].name)
 		{
 			String anchoredMessage;
-			if (TryReconcileTagsByName(dstPane, diff, suggestion, anchoredMessage))
+			if (TryReconcileTagsByName(diff, suggestion, anchoredMessage))
 				return true;
 		}
-		return FinalizeStandardSuggestion(dstPane, suggestion, message, diff.allowAdoptAgreed);
+		return FinalizeStandardSuggestion(suggestion, message);
 	}
 
-	if (foundAllTags && TryBuildInsertionSuggestion(dstPane, diff, suggestion))
-		return true;
-
-	// When a pane has no definition at the diff lines, the block may be a
-	// commented-out copy of a definition from the other panes.
+	// R6: a side without a definition at the diff lines may hold a
+	// commented-out copy of the definition the other side edited
 	String commentedMessage;
-	if (!foundAllTags && TryBuildCommentedBlockSuggestion(dstPane, diff, suggestion, commentedMessage))
-		return true;
+	for (const int commentPane : { m_roles.mine, m_roles.theirs })
+	{
+		if (!foundTag[commentPane] && TryBuildCommentedBlockSuggestion(commentPane, diff, suggestion, commentedMessage))
+			return true;
+	}
 
 	// The diff's line range maps to differently named (or missing)
 	// definitions across panes; retry the candidates by name, wherever each
 	// definition is located in each pane.
-	if (TryReconcileTagsByName(dstPane, diff, suggestion, message))
+	if (TryReconcileTagsByName(diff, suggestion, message))
 		return true;
 
 	if (message.empty())
 		message = commentedMessage;
 	if (message.empty())
-		message = _("The selected difference maps to different definitions across panes, so no safe semantic merge suggestion is available.");
+		message = _("The difference maps to different definitions across panes.");
 	return false;
-}
-
-bool Analyzer::TryCollectIndependentAdditionSuggestions(int dstPane, std::vector<Suggestion>& suggestions, String& message) const
-{
-	suggestions.clear();
-	message.clear();
-	if (dstPane != 1 || m_nPanes != 3 || !AllPanesHaveLanguage())
-		return false;
-
-	auto collectUniqueTagsByName = [](const std::vector<TagRange>& tags)
-	{
-		std::unordered_map<std::string, int> counts;
-		for (const auto& tag : tags)
-			++counts[tag.name];
-
-		std::unordered_map<std::string, TagRange> uniqueTags;
-		for (const auto& tag : tags)
-		{
-			if (counts[tag.name] == 1)
-				uniqueTags[tag.name] = tag;
-		}
-		return uniqueTags;
-	};
-
-	const std::vector<TagRange>* paneTags[3] =
-	{
-		&m_panes[0].tags,
-		&m_panes[1].tags,
-		&m_panes[2].tags
-	};
-	if (paneTags[0]->empty() || paneTags[1]->empty() || paneTags[2]->empty())
-		return false;
-
-	const auto uniqueMiddleTags = collectUniqueTagsByName(*paneTags[1]);
-	const auto uniqueLeftTags = collectUniqueTagsByName(*paneTags[0]);
-	const auto uniqueRightTags = collectUniqueTagsByName(*paneTags[2]);
-
-	struct AdditionGroup
-	{
-		int insertLine = -1;
-		int insertChar = 0;
-		bool beforeNext = true;
-		std::vector<String> names;
-		std::vector<String> texts;
-		std::vector<DefinitionInfo> defs;
-	};
-
-	std::unordered_map<String, AdditionGroup> groups;
-	std::unordered_map<std::string, String> seenMissingTexts;
-	std::unordered_map<std::string, String> seenGroupKeys;
-
-	auto collectFromSourcePane = [&](int srcPane, const auto& uniqueSourceTags) -> bool
-	{
-		for (size_t i = 0; i < paneTags[srcPane]->size(); ++i)
-		{
-			const auto& tag = (*paneTags[srcPane])[i];
-			if (uniqueSourceTags.find(tag.name) == uniqueSourceTags.end())
-				continue;
-			if (uniqueMiddleTags.find(tag.name) != uniqueMiddleTags.end())
-				continue;
-
-			String addedText;
-			if (!GetDefinitionText(*m_panes[srcPane].pText, tag, addedText))
-				return false;
-
-			auto seenIt = seenMissingTexts.find(tag.name);
-			if (seenIt != seenMissingTexts.end())
-			{
-				if (seenIt->second != addedText)
-				{
-					message = _("Both changed panes add a definition with the same name but different contents, so no safe semantic copy suggestion is available.");
-					return false;
-				}
-				// the same definition added by the other pane as well
-				auto keyIt = seenGroupKeys.find(tag.name);
-				if (keyIt != seenGroupKeys.end())
-					groups[keyIt->second].defs.push_back(DefinitionInfo{ tag, srcPane, addedText });
-				continue;
-			}
-
-			const TagRange* prevMiddleTag = nullptr;
-			const TagRange* nextMiddleTag = nullptr;
-			for (size_t j = i; j-- > 0; )
-			{
-				auto prevIt = uniqueMiddleTags.find((*paneTags[srcPane])[j].name);
-				if (prevIt != uniqueMiddleTags.end())
-				{
-					prevMiddleTag = &prevIt->second;
-					break;
-				}
-			}
-			for (size_t j = i + 1; j < paneTags[srcPane]->size(); ++j)
-			{
-				auto nextIt = uniqueMiddleTags.find((*paneTags[srcPane])[j].name);
-				if (nextIt != uniqueMiddleTags.end())
-				{
-					nextMiddleTag = &nextIt->second;
-					break;
-				}
-			}
-
-			if (!prevMiddleTag && !nextMiddleTag)
-				continue;
-
-			int insertLine = 0;
-			int insertChar = 0;
-			bool beforeNext = true;
-			String groupKey;
-			if (nextMiddleTag)
-			{
-				insertLine = nextMiddleTag->startLine;
-				insertChar = nextMiddleTag->startChar;
-				groupKey = strutils::format(_T("B:%d:%d"), insertLine, insertChar);
-			}
-			else
-			{
-				insertLine = prevMiddleTag->endLine;
-				insertChar = prevMiddleTag->endChar;
-				beforeNext = false;
-				groupKey = strutils::format(_T("A:%d:%d"), insertLine, insertChar);
-			}
-
-			AdditionGroup& group = groups[groupKey];
-			if (group.insertLine == -1)
-			{
-				group.insertLine = insertLine;
-				group.insertChar = insertChar;
-				group.beforeNext = beforeNext;
-			}
-			group.names.push_back(ucr::toTString(tag.name));
-			group.texts.push_back(addedText);
-			group.defs.push_back(DefinitionInfo{ tag, srcPane, addedText });
-			seenGroupKeys[tag.name] = groupKey;
-			seenMissingTexts[tag.name] = addedText;
-		}
-		return true;
-	};
-
-	if (!collectFromSourcePane(0, uniqueLeftTags) || !collectFromSourcePane(2, uniqueRightTags))
-		return false;
-
-	if (groups.empty())
-		return false;
-
-	for (const auto& entry : groups)
-	{
-		const AdditionGroup& group = entry.second;
-		Suggestion suggestion;
-		String combinedText;
-		for (size_t i = 0; i < group.texts.size(); ++i)
-		{
-			if (i > 0)
-				combinedText += _T("\n\n");
-			combinedText += group.texts[i];
-		}
-		combinedText = group.beforeNext ? (combinedText + _T("\n\n")) : (_T("\n\n") + combinedText);
-
-		suggestion.kind = SuggestionKind::IndependentAdditions;
-		suggestion.insertOnly = true;
-		suggestion.insertLine = group.insertLine;
-		suggestion.insertChar = group.insertChar;
-		suggestion.defs[dstPane].pane = dstPane;
-		suggestion.displayName = group.names.size() == 1 ? group.names[0] : _("added definitions");
-		suggestion.replacementText = combinedText;
-		suggestion.previewText = combinedText;
-		suggestion.insertedDefs = group.defs;
-		suggestions.push_back(suggestion);
-	}
-
-	return true;
-}
-
-bool Analyzer::TryCollectSuggestions(int dstPane, const std::vector<DiffInfo>& diffs, std::vector<Suggestion>& suggestions, String& message) const
-{
-	suggestions.clear();
-	message.clear();
-
-	std::vector<Suggestion> collected;
-	String additionsMessage;
-	String lastMessage;
-	for (const DiffInfo& diff : diffs)
-	{
-		Suggestion suggestion;
-		String diffMessage;
-		if (!TryBuildSuggestion(dstPane, diff, suggestion, diffMessage))
-		{
-			if (!diffMessage.empty())
-				lastMessage = diffMessage;
-			continue;
-		}
-
-		bool duplicate = false;
-		for (const auto& existing : collected)
-		{
-			if (!HaveSameDestinationDefinition(existing, suggestion, dstPane))
-				continue;
-			if (existing.replacementText != suggestion.replacementText)
-			{
-				message = _("Multiple semantic suggestions target the same destination definition with different results, so a whole-file safe semantic copy is not available.");
-				return false;
-			}
-			duplicate = true;
-			break;
-		}
-		if (!duplicate)
-			collected.push_back(suggestion);
-	}
-
-	if (collected.empty())
-	{
-		if (TryCollectIndependentAdditionSuggestions(dstPane, collected, additionsMessage) && !collected.empty())
-		{
-			std::sort(collected.begin(), collected.end(), [dstPane](const Suggestion& left, const Suggestion& right)
-			{
-				return CompareSuggestionsByDescendingDestination(left, right, dstPane);
-			});
-			suggestions.swap(collected);
-			return true;
-		}
-
-		if (!additionsMessage.empty())
-		{
-			message = additionsMessage;
-			return false;
-		}
-
-		message = !lastMessage.empty() ? lastMessage : _("No safe semantic copy suggestions are available for the destination pane.");
-		return false;
-	}
-
-	std::sort(collected.begin(), collected.end(), [dstPane](const Suggestion& left, const Suggestion& right)
-	{
-		return CompareSuggestionsByDescendingDestination(left, right, dstPane);
-	});
-
-	for (size_t i = 1; i < collected.size(); ++i)
-	{
-		const auto& previous = collected[i - 1];
-		const auto& current = collected[i];
-		if (previous.insertOnly && current.insertOnly)
-		{
-			if (current.insertLine == previous.insertLine && current.insertChar == previous.insertChar)
-			{
-				message = _("Some semantic suggestions overlap in the destination pane, so a whole-file safe semantic copy is not available.");
-				return false;
-			}
-			continue;
-		}
-		if (previous.insertOnly || current.insertOnly)
-			continue;
-
-		const auto& previousTag = previous.defs[dstPane].tag;
-		const auto& currentTag = current.defs[dstPane].tag;
-		if (currentTag.endLine > previousTag.startLine ||
-			(currentTag.endLine == previousTag.startLine && currentTag.endChar > previousTag.startChar))
-		{
-			message = _("Some semantic suggestions overlap in the destination pane, so a whole-file safe semantic copy is not available.");
-			return false;
-		}
-	}
-
-	suggestions.swap(collected);
-	return true;
 }
 
 
@@ -1863,6 +1307,107 @@ bool MergeTokensThreeWay(const String& baseText, const String& oursText, const S
 		merged += out[i].token->text;
 	}
 	merged += trailingSpace;
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Definition-level decisions of rules R1 and R3
+// ---------------------------------------------------------------------------
+
+std::vector<String> SqueezeNonBlankLines(const std::vector<String>& lines)
+{
+	std::vector<String> squeezed;
+	for (const String& line : lines)
+	{
+		String text;
+		for (tchar_t ch : line)
+		{
+			if (ch != _T(' ') && ch != _T('\t') && ch != _T('\r') && ch != _T('\n'))
+				text += ch;
+		}
+		if (!text.empty())
+			squeezed.push_back(std::move(text));
+	}
+	return squeezed;
+}
+
+DuplicateDrop ChooseDuplicateAdditionToDrop(const std::vector<String>& mineLines, const std::vector<String>& theirsLines)
+{
+	std::vector<String> mine = SqueezeNonBlankLines(mineLines);
+	std::vector<String> theirs = SqueezeNonBlankLines(theirsLines);
+	std::sort(mine.begin(), mine.end());
+	std::sort(theirs.begin(), theirs.end());
+	if (std::includes(mine.begin(), mine.end(), theirs.begin(), theirs.end()))
+		return DuplicateDrop::Theirs;
+	if (std::includes(theirs.begin(), theirs.end(), mine.begin(), mine.end()))
+		return DuplicateDrop::Mine;
+	return DuplicateDrop::None;
+}
+
+DuplicateDrop ChooseContainedAdditionToDrop(const std::vector<String>& mineLines, const std::vector<String>& theirsLines)
+{
+	const std::vector<String> mine = SqueezeNonBlankLines(mineLines);
+	const std::vector<String> theirs = SqueezeNonBlankLines(theirsLines);
+	auto contains = [](const std::vector<String>& outer, const std::vector<String>& inner)
+	{
+		return !inner.empty() && inner.size() < outer.size() &&
+			std::search(outer.begin(), outer.end(), inner.begin(), inner.end()) != outer.end();
+	};
+	if (contains(mine, theirs))
+		return DuplicateDrop::Theirs;
+	if (contains(theirs, mine))
+		return DuplicateDrop::Mine;
+	return DuplicateDrop::None;
+}
+
+MovedSide DetectMovedDefinition(int baseStart, int baseEnd, int mineStart, int mineEnd, int theirsStart, int theirsEnd)
+{
+	auto overlapsBase = [&](int start, int end) { return start <= baseEnd && end >= baseStart; };
+	const bool bMineInPlace = overlapsBase(mineStart, mineEnd);
+	const bool bTheirsInPlace = overlapsBase(theirsStart, theirsEnd);
+	if (!bMineInPlace && bTheirsInPlace)
+		return MovedSide::Mine;
+	if (!bTheirsInPlace && bMineInPlace)
+		return MovedSide::Theirs;
+	return MovedSide::None;
+}
+
+bool MergeMovedDefinition(const std::vector<String>& baseLines, const std::vector<String>& moverLines,
+	const std::vector<String>& editorLines, const LanguageTraits& traits, std::vector<String>& mergedLines)
+{
+	mergedLines.clear();
+	// the mover only moved it: the editor's version as it is
+	if (moverLines == baseLines)
+	{
+		mergedLines = editorLines;
+		return true;
+	}
+	// the editor only re-laid it out: nothing but the move, which the line merge does
+	if (SqueezeNonBlankLines(editorLines) == SqueezeNonBlankLines(baseLines))
+		return false;
+	// both changed it: merge what each did, token by token
+	auto join = [](const std::vector<String>& lines)
+	{
+		String text;
+		for (const String& line : lines)
+			text += line + _T("\n");
+		return text;
+	};
+	String merged;
+	if (!MergeTokensThreeWay(join(baseLines), join(moverLines), join(editorLines), traits, merged))
+		return false;
+	size_t pos = 0;
+	while (pos < merged.length())
+	{
+		const size_t end = merged.find(_T('\n'), pos);
+		if (end == String::npos)
+		{
+			mergedLines.push_back(merged.substr(pos));
+			break;
+		}
+		mergedLines.push_back(merged.substr(pos, end - pos));
+		pos = end + 1;
+	}
 	return true;
 }
 

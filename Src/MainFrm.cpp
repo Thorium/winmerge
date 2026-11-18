@@ -39,10 +39,6 @@
 #include "ImgMergeFrm.h"
 #include "WebPageDiffFrm.h"
 #include "FileCmpReport.h"
-#include "UnicodeString.h"
-#include "paths.h"
-#include "Environment.h"
-#include <Windows.h>
 #include "OutputDoc.h"
 #include "OutputBar.h"
 #include "OutputView.h"
@@ -1179,7 +1175,6 @@ bool CMainFrame::ShowTextOrTableMergeDoc(std::optional<bool> table, IDirDoc * pD
 	bool bShowMergeResultPane = false;
 	bool bAutoMerge = false;
 	int nMergeBasePane = 1;
-	int nSemanticAutoMergePane = -1;
 
 	for (int pane = 0; pane < nFiles; pane++)
 	{
@@ -1196,15 +1191,6 @@ bool CMainFrame::ShowTextOrTableMergeDoc(std::optional<bool> table, IDirDoc * pD
 				nMergeBasePane = 2 - pane;
 				bAutoMerge = (dwFlags[pane] & FFILEOPEN_AUTOMERGE) != 0;
 				bShowMergeResultPane = GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED);
-			}
-			if (dwFlags[pane] & FFILEOPEN_SEMANTIC_AUTOMERGE)
-			{
-				nSemanticAutoMergePane = pane;
-				if (nFiles == 3)
-				{
-					nMergeBasePane = 2 - pane;
-					bShowMergeResultPane = GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED);
-				}
 			}
 		}
 	}
@@ -1229,58 +1215,6 @@ bool CMainFrame::ShowTextOrTableMergeDoc(std::optional<bool> table, IDirDoc * pD
 		pMergeDoc->StartMergeSession(nFiles == 2 ? 0 : nMergeBasePane, bAutoMerge, false);
 	else if (bAutoMerge)
 		pMergeDoc->DoAutoMerge(2 - nMergeBasePane);
-
-	if (nSemanticAutoMergePane >= 0)
-	{
-		const int pane = nSemanticAutoMergePane;
-		bool appliedSemanticMerge = false;
-		String lastSemanticMessage;
-		String message;
-		if (pMergeDoc->DoAllSemanticMergeSuggestions(pane, message))
-		{
-			appliedSemanticMerge = true;
-			lastSemanticMessage = message;
-		}
-		else
-		{
-			if (!message.empty())
-				lastSemanticMessage = message;
-
-			const int diffCount = pMergeDoc->m_diffList.GetSize();
-			for (int nSemanticDiff = 0; nSemanticDiff < diffCount; ++nSemanticDiff)
-			{
-				if (!pMergeDoc->m_diffList.IsDiffSignificant(nSemanticDiff))
-					continue;
-
-				message.clear();
-				if (pMergeDoc->DoSemanticMergeSuggestion(pane, nSemanticDiff, message))
-				{
-					appliedSemanticMerge = true;
-					lastSemanticMessage = message;
-					break;
-				}
-				if (!message.empty())
-					lastSemanticMessage = message;
-			}
-		}
-
-		if (theApp.GetNonInteractive() && !lastSemanticMessage.empty())
-			CMergeApp::OutputConsole(lastSemanticMessage);
-
-		// in a merge session the semantic merge went to the merge result
-		const bool bToResult = pMergeDoc->IsSemanticMergeToResult(pane);
-		if (appliedSemanticMerge &&
-			!(bToResult ? pMergeDoc->GetMergeResultSavePath() : pMergeDoc->GetSaveAsPath()).empty())
-		{
-			bool bSaveSuccess = false;
-			if (bToResult)
-				bSaveSuccess = pMergeDoc->SaveMergeResult(false);
-			else
-				pMergeDoc->DoSave(pMergeDoc->GetPath(pane).c_str(), bSaveSuccess, pane);
-			if (theApp.GetNonInteractive())
-				CMergeApp::OutputConsole(bSaveSuccess ? _T("Semantic CLI save succeeded.") : _T("Semantic CLI save failed."));
-		}
-	}
 
 	if (!sReportFile.empty())
 		GenerateDocumentReport({ pMergeDoc }, sReportFile);

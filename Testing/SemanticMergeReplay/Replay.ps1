@@ -93,7 +93,7 @@ function Invoke-Run {
     $exe = (Resolve-Path $WinMerge).Path
     $configs = [ordered]@{
         line     = @()
-        semantic = @('-cfg', 'Settings/SemanticMergeExperimental=1', '-cfg', 'Settings/AutoMergeSemanticFallback=1')
+        semantic = @('-semantic')
     }
     $cases = Get-ChildItem $Corpus -Directory | ForEach-Object { Get-ChildItem $_.FullName -Directory } |
         Where-Object { $_.FullName -like "*$Filter*" }

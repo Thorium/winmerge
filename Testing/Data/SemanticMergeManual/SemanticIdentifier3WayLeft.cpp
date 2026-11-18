@@ -2,8 +2,8 @@ namespace Demo {
 
 int FormatScore(int value)
 {
-	int score = value * 3;
-	return score + 1;
+	int total = value * 3;
+	return total + 1;
 }
 
 }

@@ -1,8 +1,8 @@
 namespace Demo {
 
-int ComputeScore(int offset)
+int ComputeScore(int base)
 {
-	int doubled = offset * 2;
+	int doubled = base * 2;
 	return doubled + 1;
 }
 

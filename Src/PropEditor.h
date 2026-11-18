@@ -30,7 +30,6 @@ public:
 	int     m_nHiliteSyntaxMode;
 	bool    m_bTreeSitterOccurrenceHighlight;
 	bool    m_bTreeSitterBreadcrumb;
-	bool    m_bSemanticMergeExperimental;
 	int	    m_nTabType;
 	unsigned m_nTabSize;
 	bool    m_bAllowMixedEol;

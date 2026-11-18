@@ -105,8 +105,8 @@ BEGIN
         MENUITEM "Choose Middle for All Unresolved Conflicts", ID_MERGE_RESULT_CHOOSE_ALL_2ND
         MENUITEM "Choose Right for All Unresolved Conflicts",  ID_MERGE_RESULT_CHOOSE_ALL_3RD
         MENUITEM "A&uto Merge\tCtrl+Alt+M",     ID_AUTO_MERGE
-        MENUITEM "Safe Semantic Cop&y\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
-        MENUITEM "Safe Semantic Copy A&ll",     ID_SEMANTIC_MERGE_ALL
+        MENUITEM "Resolve Conflict Semanticall&y\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
+        MENUITEM "Resolve A&ll Conflicts Semantically\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
         MENUITEM "&Next Semantic Resolution",   ID_NEXT_SEMANTIC_RESOLUTION
         MENUITEM "&Previous Semantic Resolution", ID_PREV_SEMANTIC_RESOLUTION
         MENUITEM SEPARATOR
@@ -147,8 +147,8 @@ BEGIN
         MENUITEM "Choose Middle for All Unresolved Conflicts", ID_MERGE_RESULT_CHOOSE_ALL_2ND
         MENUITEM "Choose Right for All Unresolved Conflicts",  ID_MERGE_RESULT_CHOOSE_ALL_3RD
         MENUITEM "A&uto Merge\tCtrl+Alt+M",     ID_AUTO_MERGE
-        MENUITEM "Safe Semantic Cop&y\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
-        MENUITEM "Safe Semantic Copy A&ll",     ID_SEMANTIC_MERGE_ALL
+        MENUITEM "Resolve Conflict Semanticall&y\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
+        MENUITEM "Resolve A&ll Conflicts Semantically\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
         MENUITEM "&Next Semantic Resolution",   ID_NEXT_SEMANTIC_RESOLUTION
         MENUITEM "&Previous Semantic Resolution", ID_PREV_SEMANTIC_RESOLUTION
         MENUITEM SEPARATOR
@@ -194,16 +194,12 @@ BEGIN
         MENUITEM "Copy Selected Diff (Right) to Clipboard\tCtrl+&3", ID_SEL_DIFF_COPY_3RD
         MENUITEM SEPARATOR
         MENUITEM "Select Line &Difference\tF4", ID_SELECTLINEDIFF
-        POPUP "Safe Semantic Cop&y"
+        POPUP "Semantic Merge"
         BEGIN
-            MENUITEM "To &Left",                    ID_SEMANTIC_MERGE_LEFT
-            MENUITEM "To &Middle",                  ID_SEMANTIC_MERGE_MIDDLE
-            MENUITEM "To &Right",                   ID_SEMANTIC_MERGE_RIGHT
+            MENUITEM "Resolve Conflict Semantically\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
+            MENUITEM "Resolve All Conflicts Semantically\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
             MENUITEM SEPARATOR
-            MENUITEM "To Current Pane\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
-            MENUITEM "All to Current Pane\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
-            MENUITEM SEPARATOR
-            MENUITEM "Use for Auto Mer&ge Conflicts", ID_SEMANTIC_MERGE_AUTO_FALLBACK
+            MENUITEM "Resolve Conflicts Semantically (Experimental)", ID_SEMANTIC_MERGE_OPTION
         END
         POPUP "Add to &Filters"
         BEGIN
@@ -970,16 +966,12 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "Start Merge Sess&ion",        ID_MERGE_START_SESSION
         MENUITEM "A&uto Merge\tCtrl+Alt+M",     ID_AUTO_MERGE
-        POPUP "Safe Semantic Cop&y"
+        POPUP "Semantic Merge"
         BEGIN
-            MENUITEM "To &Left",                    ID_SEMANTIC_MERGE_LEFT
-            MENUITEM "To &Middle",                  ID_SEMANTIC_MERGE_MIDDLE
-            MENUITEM "To &Right",                   ID_SEMANTIC_MERGE_RIGHT
+            MENUITEM "Resolve Conflict Semantically\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
+            MENUITEM "Resolve All Conflicts Semantically\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
             MENUITEM SEPARATOR
-            MENUITEM "To Current Pane\tCtrl+Alt+Shift+M", ID_SEMANTIC_MERGE
-            MENUITEM "All to Current Pane\tCtrl+Alt+Shift+A", ID_SEMANTIC_MERGE_ALL
-            MENUITEM SEPARATOR
-            MENUITEM "Use for Auto Mer&ge Conflicts", ID_SEMANTIC_MERGE_AUTO_FALLBACK
+            MENUITEM "Resolve Conflicts Semantically (Experimental)", ID_SEMANTIC_MERGE_OPTION
         END
         MENUITEM SEPARATOR
         MENUITEM "Add &Synchronization Point\tAlt+S", ID_ADD_SYNCPOINT
@@ -2234,6 +2226,7 @@ END
 IDR_MAINFRAME ACCELERATORS
 BEGIN
     "A",            ID_EDIT_SELECT_ALL,     VIRTKEY, CONTROL, NOINVERT
+    "A",            ID_SEMANTIC_MERGE_ALL,  VIRTKEY, SHIFT, CONTROL, ALT, NOINVERT
     "C",            ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
     "D",            ID_VIEW_DIFFCONTEXT_TOGGLE, VIRTKEY, CONTROL, NOINVERT
     "D",            ID_EDITOR_EDIT_PATH,    VIRTKEY, ALT, NOINVERT
@@ -2769,7 +2762,6 @@ BEGIN
     COMBOBOX        IDC_HILITE_SYNTAX_MODE,7,30,310,34,CBS_DROPDOWNLIST | WS_VSCROLL | WS_GROUP | WS_TABSTOP
     CONTROL         "Highlight symbol occ&urrences at caret (tree-sitter)",IDC_TREE_SITTER_OCCURRENCE_CHECK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,46,309,10
     CONTROL         "Show enclosing-symbol path in status &bar (tree-sitter)",IDC_TREE_SITTER_BREADCRUMB_CHECK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,58,309,10
-    CONTROL         "Enable e&xperimental safe semantic copy suggestions",IDC_SEMANTIC_MERGE_CHECK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,70,309,10
     CONTROL         "&Preserve original EOL",IDC_MIXED_EOL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,84,309,10
     GROUPBOX        "Tabs",IDC_STATIC,7,96,311,72,WS_GROUP
     LTEXT           "&Tab size:",IDC_STATIC,14,108,256,10
@@ -2796,6 +2788,7 @@ BEGIN
     LTEXT           "W&ord break characters:",IDC_STATIC,24,112,286,10
     EDITTEXT        IDC_BREAK_CHARS,24,124,286,14,ES_AUTOHSCROLL
     CONTROL         "&Use Merge Result Pane for 2/3-way merge",IDC_MERGE_RESULT_PANE_ENABLED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,144,309,10
+    CONTROL         "Resolve conflicts &semantically in the Merge Result Pane (experimental, tree-sitter)",IDC_SEMANTIC_MERGE_CHECK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,158,309,10
     PUSHBUTTON      "Defaults",IDC_COMPARE_DEFAULTS,230,280,88,14
 END
 
@@ -3047,17 +3040,6 @@ BEGIN
     LTEXT           "Lines between start and end filter matches will be included.",IDC_STATIC,6,46,290,18
     DEFPUSHBUTTON   "OK",IDOK,265,75,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,325,75,50,14
-END
-
-IDD_SEMANTIC_PREVIEW_DLG DIALOGEX 0, 0, 420, 270
-STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX
-CAPTION "Safe Semantic Copy"
-FONT 8, FONTNAME, 0, 0, 0x1
-BEGIN
-    LTEXT           "",IDC_SEMANTIC_PREVIEW_HEADER,7,7,406,32
-    LTEXT           "",IDC_SEMANTIC_PREVIEW_CODE,7,43,406,200,NOT WS_VISIBLE
-    DEFPUSHBUTTON   "&Apply",IDOK,303,249,50,14
-    PUSHBUTTON      "Cancel",IDCANCEL,363,249,50,14
 END
 
 IDD_PROPPAGE_CODEPAGE DIALOGEX 0, 0, 325, 294
@@ -5554,12 +5536,9 @@ BEGIN
     ID_ALL_RIGHT            "\nCopy All to Right"
     ID_ALL_LEFT             "\nCopy All to Left"
     ID_AUTO_MERGE           "\nAuto Merge (Ctrl+Alt+M)"
-    ID_SEMANTIC_MERGE       "\nSafe Semantic Copy to Current Pane (Ctrl+Alt+Shift+M)"
-    ID_SEMANTIC_MERGE_ALL   "\nSafe Semantic Copy All to Current Pane (Ctrl+Alt+Shift+A)"
-    ID_SEMANTIC_MERGE_LEFT  "\nSafe Semantic Copy to Left"
-    ID_SEMANTIC_MERGE_MIDDLE "\nSafe Semantic Copy to Middle"
-    ID_SEMANTIC_MERGE_RIGHT "\nSafe Semantic Copy to Right"
-    ID_SEMANTIC_MERGE_AUTO_FALLBACK "\nTry safe semantic copy on conflicts that Auto Merge cannot resolve"
+    ID_SEMANTIC_MERGE       "Resolve the conflict at the cursor with the semantic merge rules\nResolve Conflict Semantically (Ctrl+Alt+Shift+M)"
+    ID_SEMANTIC_MERGE_ALL   "Resolve every pending conflict with the semantic merge rules\nResolve All Conflicts Semantically (Ctrl+Alt+Shift+A)"
+    ID_SEMANTIC_MERGE_OPTION "Use the semantic merge rules in Auto Merge and the semantic commands\nResolve Conflicts Semantically (Experimental)"
     ID_NEXT_SEMANTIC_RESOLUTION "\nNext Semantic Resolution"
     ID_PREV_SEMANTIC_RESOLUTION "\nPrevious Semantic Resolution"
     ID_FIRSTFILE            "\nFirst File"

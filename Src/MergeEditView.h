@@ -215,15 +215,8 @@ protected:
 	void OnUpdatePrev3wayDiff(CCmdUI* pCmdUI, int type);
 	void OnDropFiles(const std::vector<String>& files);
 	void SelDiffCopy(int actPane);
-	bool CanSemanticMergeToPane(int dstPane);
-	bool UsesMergeResultForSemanticMerge() const;
-	bool SemanticMergeToResult(int dstPane, bool bAll);
-	int GetTargetPaneForSemanticMergeCommand(UINT nID) const;
+	void ResolveSemantically(bool bAll);
 	int GetSemanticMergeDiff() const;
-	int GetSemanticMergeDiffOrSuggested(int dstPane, String& message) const;
-	void GetSemanticMergeAnchor(int nDiff, int& anchorPane, int& anchorLine) const;
-	String GetSemanticPreviewTitle(int dstPane) const;
- 	bool CanSemanticMergeAllToPane(int dstPane);
 
 	// Generated message map functions
 protected:
@@ -292,10 +285,8 @@ protected:
 	afx_msg void OnUpdateSemanticMerge(CCmdUI* pCmdUI);
 	afx_msg void OnSemanticMergeAll();
 	afx_msg void OnUpdateSemanticMergeAll(CCmdUI* pCmdUI);
-	afx_msg void OnSemanticMergeAutoFallback();
-	afx_msg void OnUpdateSemanticMergeAutoFallback(CCmdUI* pCmdUI);
-	afx_msg void OnSemanticMergeToPane(UINT nID);
-	afx_msg void OnUpdateSemanticMergeToPane(CCmdUI* pCmdUI);
+	afx_msg void OnSemanticMergeOption();
+	afx_msg void OnUpdateSemanticMergeOption(CCmdUI* pCmdUI);
 	afx_msg void OnCopyX2Y(UINT nID);
 	afx_msg void OnCopyLinesX2Y(UINT nID);
 	afx_msg void OnX2Y(int srcPane, int dstPane, bool selectedLineOnly = false);

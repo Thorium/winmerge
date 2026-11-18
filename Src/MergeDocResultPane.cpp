@@ -466,8 +466,7 @@ void CMergeDoc::ApplyAutoMergeToResult()
 	// merge resolves the one-sided fragments of a conflicting definition
 	// independently, which can leave it semantically mangled
 	ResetSemanticResolutionCounts();
-	const int nSemantic = GetOptionsMgr()->GetBool(OPT_AUTO_MERGE_SEMANTIC_FALLBACK) ?
-		DoSemanticMergeConflictsToResult() : 0;
+	const int nSemantic = IsSemanticMergeEnabled() ? DoSemanticMergeConflictsToResult() : 0;
 
 	CMergeResultTextBuffer::InternalOpGuard guard(*m_ptResultBuf);
 
@@ -810,8 +809,6 @@ String SemanticRuleName(SemanticRule rule)
 	case SemanticRule::DefinitionChange: return _("One-sided definition change");
 	case SemanticRule::LocalizedChange: return _("Small change onto refactored definition");
 	case SemanticRule::CommentedOut: return _("Commented-out definition update");
-	case SemanticRule::DefinitionAddition: return _("Definition addition");
-	case SemanticRule::AgreedVersion: return _("Agreed version");
 	default: return String();
 	}
 }
@@ -1977,17 +1974,8 @@ bool MatchSemanticRegion(std::vector<SemanticRegionItem>& items, size_t nItem,
 }
 
 /**
- * @brief Does a safe semantic copy into dstPane go to the merge result?
- *
- * During a merge session the compared panes are read-only and the result
- * pane holds the content of the merge destination pane.
+ * @brief The pane the merge result stands for.
  */
-bool CMergeDoc::IsSemanticMergeToResult(int dstPane) const
-{
-	return m_bResultBuilt && m_nBuffers == 3 && m_ptResultBuf != nullptr &&
-		dstPane == GetMergePaneMapping(m_nMergeBasePane).nMergeDestPane;
-}
-
 int CMergeDoc::GetMergeDestPane() const
 {
 	return m_nBuffers == 2 ? 1 : GetMergePaneMapping(m_nMergeBasePane).nMergeDestPane;
@@ -2244,78 +2232,116 @@ int CMergeDoc::RewritePaneLinesInResult(int nPane, int nBeginLine, int nEndLine,
 }
 
 /**
- * @brief Apply a safe semantic copy suggestion for the merge destination
- * pane to the merge result.
+ * @brief Roles of the panes for the semantic analyzer, from the merge pane mapping (G1).
+ */
+SemanticMerge::MergeRoles CMergeDoc::GetSemanticMergeRoles() const
+{
+	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
+	SemanticMerge::MergeRoles roles;
+	roles.base = panes.nBasePane;
+	roles.mine = panes.nMinePane;
+	roles.theirs = panes.nTheirsPane;
+	return roles;
+}
+
+/**
+ * @brief G4: the file of nPane with lines nBeginLine..nEndLine replaced by
+ * newText must not have more syntax errors than the worse of the two sides'
+ * files.
+ * @param newText Whole lines, each ending with a line end; empty removes the lines.
+ */
+bool CMergeDoc::IsSemanticResultSyntaxOk(int nPane, int nBeginLine, int nEndLine, const String& newText)
+{
+	CTreeSitterParser* pParser = GetTreeSitterParser(nPane);
+	const CTreeSitterLanguage* pLang = (pParser != nullptr && pParser->HasLanguage()) ? pParser->GetLanguage() : nullptr;
+	if (pLang == nullptr)
+		return false;
+	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
+	auto wholeFile = [&](int nFilePane)
+	{
+		return GetPaneApparentLinesText(nFilePane, 0, m_ptBuf[nFilePane]->GetLineCount() - 1, nullptr);
+	};
+	const int nLastLine = m_ptBuf[nPane]->GetLineCount() - 1;
+	const String text = GetPaneApparentLinesText(nPane, 0, nBeginLine - 1, nullptr) + newText +
+		GetPaneApparentLinesText(nPane, nEndLine + 1, nLastLine, nullptr);
+	const int nErrors = pLang->CountSyntaxErrors(text);
+	const int nMineErrors = pLang->CountSyntaxErrors(wholeFile(panes.nMinePane));
+	const int nTheirsErrors = pLang->CountSyntaxErrors(wholeFile(panes.nTheirsPane));
+	return nErrors >= 0 && nErrors <= (std::max)(nMineErrors, nTheirsErrors);
+}
+
+/**
+ * @brief Apply a definition-level resolution (R4-R6) to the merge result.
  *
- * The suggestion describes an edit of the destination pane. Where the
- * wanted text can be had by choosing panes for the differences it covers,
- * that is done, which keeps the provenance markers. Otherwise those
- * differences take the destination pane's text and the lines that differ
- * are rewritten like a hand edit.
+ * The result is to read like the suggestion's anchor pane with the
+ * definition replaced. Where that text can be had by choosing panes for the
+ * differences it covers, that is done, which keeps the provenance markers.
+ * Otherwise those differences take the anchor pane's text and the lines
+ * that differ are rewritten like a hand edit.
  *
- * @param [in] bExplicit The user asked for this difference; otherwise
- *  differences that are already resolved by hand are left alone.
  * @param [in,out] bGroupWithPrevious Undo grouping across several calls.
  */
-bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
-	const SemanticMerge::Suggestion& suggestion, bool bExplicit,
+bool CMergeDoc::ApplySemanticSuggestionToResult(const SemanticMerge::Suggestion& suggestion,
 	bool& bGroupWithPrevious, String& message)
 {
-	if (!IsSemanticMergeToResult(dstPane))
-		return false;
 	const int nDiffCount = m_diffList.GetSize();
-	if (static_cast<int>(m_resultDiffToSegment.size()) != nDiffCount)
+	if (!m_bResultBuilt || m_nBuffers != 3 || static_cast<int>(m_resultDiffToSegment.size()) != nDiffCount)
 	{
 		message = _("The merge result no longer matches the compared files.");
 		return false;
 	}
 
-	// A change that only the base pane lacks is no change to merge
 	const int nBasePane = m_nMergeBasePane;
-	const int srcPane = suggestion.srcPane >= 0 ? suggestion.srcPane : suggestion.changedPane;
-	bool bFromBase = dstPane != nBasePane && srcPane == nBasePane;
-	for (const auto& def : suggestion.insertedDefs)
-		bFromBase = bFromBase || (dstPane != nBasePane && def.pane == nBasePane);
-	if (bFromBase)
-	{
-		message = _("The suggestion would copy the base version into the merge result.");
-		return false;
-	}
-
-	// Destination lines the suggestion rewrites, and their new text
-	const CDiffTextBuffer* pDstBuf = m_ptBuf[dstPane].get();
-	const int nDstLineCount = pDstBuf->GetLineCount();
-	const SemanticMerge::TagRange& dstTag = suggestion.defs[dstPane].tag;
-	const int nEditBegin = suggestion.insertOnly ? suggestion.insertLine : dstTag.startLine;
-	const int nEditEnd = suggestion.insertOnly ? suggestion.insertLine : dstTag.endLine;
-	const int nEditBeginChar = suggestion.insertOnly ? suggestion.insertChar : dstTag.startChar;
-	const int nEditEndChar = suggestion.insertOnly ? suggestion.insertChar : dstTag.endChar;
-	const String failed = _("The suggestion cannot be applied to the merge result.");
-	if (nEditBegin < 0 || nEditEnd < nEditBegin || nEditEnd >= nDstLineCount ||
-		(pDstBuf->GetLineFlags(nEditBegin) & LF_GHOST) || (pDstBuf->GetLineFlags(nEditEnd) & LF_GHOST) ||
-		nEditBeginChar < 0 || nEditBeginChar > pDstBuf->GetLineLength(nEditBegin) ||
-		nEditEndChar < 0 || nEditEndChar > pDstBuf->GetLineLength(nEditEnd))
+	const int anchorPane = suggestion.anchorPane;
+	const int srcPane = suggestion.changedPane;
+	const String failed = _("The resolution cannot be applied to the merge result.");
+	if (anchorPane < 0 || anchorPane >= m_nBuffers || srcPane < 0 || srcPane >= m_nBuffers)
 	{
 		message = failed;
 		return false;
 	}
-	String newText(pDstBuf->GetLineChars(nEditBegin), nEditBeginChar);
+
+	// Anchor lines the resolution rewrites, and their new text
+	const CDiffTextBuffer* pAnchorBuf = m_ptBuf[anchorPane].get();
+	const SemanticMerge::TagRange& anchorTag = suggestion.defs[anchorPane].tag;
+	const int nEditBegin = anchorTag.startLine;
+	const int nEditEnd = anchorTag.endLine;
+	if (nEditBegin < 0 || nEditEnd < nEditBegin || nEditEnd >= pAnchorBuf->GetLineCount() ||
+		(pAnchorBuf->GetLineFlags(nEditBegin) & LF_GHOST) || (pAnchorBuf->GetLineFlags(nEditEnd) & LF_GHOST) ||
+		anchorTag.startChar < 0 || anchorTag.startChar > pAnchorBuf->GetLineLength(nEditBegin) ||
+		anchorTag.endChar < 0 || anchorTag.endChar > pAnchorBuf->GetLineLength(nEditEnd))
+	{
+		message = failed;
+		return false;
+	}
+	String newText(pAnchorBuf->GetLineChars(nEditBegin), anchorTag.startChar);
 	newText += suggestion.replacementText;
-	newText.append(pDstBuf->GetLineChars(nEditEnd) + nEditEndChar,
-		pDstBuf->GetLineLength(nEditEnd) - nEditEndChar);
+	newText.append(pAnchorBuf->GetLineChars(nEditEnd) + anchorTag.endChar,
+		pAnchorBuf->GetLineLength(nEditEnd) - anchorTag.endChar);
 	std::vector<String> newLines;
 	SplitTextIntoLines(newText, newLines);
-	std::vector<String> oldLines;
-	std::vector<int> oldApparent;
-	GetPaneRealLines(dstPane, nEditBegin, nEditEnd, oldLines, &oldApparent);
 
-	// Differences involved: those the rewritten lines overlap, and those
-	// holding the copied definition(s) in the pane they come from. The
-	// latter matter when a definition was moved or added: its source lines
-	// must not end up in the result a second time.
-	std::vector<SemanticMerge::DefinitionInfo> sources = suggestion.insertedDefs;
-	if (!suggestion.insertOnly && srcPane >= 0 && srcPane != dstPane && suggestion.defs[srcPane].pane == srcPane)
-		sources.push_back(suggestion.defs[srcPane]);
+	// G4
+	{
+		String newLinesText;
+		for (const String& line : newLines)
+			newLinesText += line + _T("\n");
+		if (!IsSemanticResultSyntaxOk(anchorPane, nEditBegin, nEditEnd, newLinesText))
+		{
+			message = _("The resolution would add syntax errors.");
+			return false;
+		}
+	}
+
+	// The definition's lines in the other panes are accounted for by the
+	// resolution: the differences holding them are involved, and their
+	// lines must not end up in the result a second time
+	std::vector<SemanticMerge::DefinitionInfo> sources;
+	for (int nPane = 0; nPane < m_nBuffers; ++nPane)
+	{
+		if (nPane != anchorPane && suggestion.defs[nPane].pane == nPane)
+			sources.push_back(suggestion.defs[nPane]);
+	}
 	auto isSourceLine = [&](int nPane, int nLine)
 	{
 		for (const auto& def : sources)
@@ -2327,14 +2353,14 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 	};
 	auto isEditLine = [&](int nLine)
 	{
-		return !suggestion.insertOnly && nLine >= nEditBegin && nLine <= nEditEnd;
+		return nLine >= nEditBegin && nLine <= nEditEnd;
 	};
-	// What a difference holds besides the lines the suggestion accounts
-	// for. Taking the destination pane's text for the difference must not
-	// decide anything else on the way.
+	// What a difference holds besides the lines the resolution accounts
+	// for. Taking the anchor pane's text for the difference must not decide
+	// anything else on the way.
 	auto hasOnlySuggestionLines = [&](const DIFFRANGE* pdi)
 	{
-		const bool bDstSide = pdi->dbegin <= nEditEnd && pdi->dend >= nEditBegin;
+		const bool bAnchorSide = pdi->dbegin <= nEditEnd && pdi->dend >= nEditBegin;
 		std::vector<String> rest[3];
 		bool bHasSource[3] = { false, false, false };
 		for (int nPane = 0; nPane < m_nBuffers; ++nPane)
@@ -2344,42 +2370,39 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 			GetPaneRealLines(nPane, pdi->dbegin, pdi->dend, lines, &apparent);
 			for (size_t i = 0; i < lines.size(); ++i)
 			{
-				const bool bSource = nPane != dstPane && isSourceLine(nPane, apparent[i]);
+				const bool bSource = nPane != anchorPane && isSourceLine(nPane, apparent[i]);
 				bHasSource[nPane] = bHasSource[nPane] || bSource;
 				if (!bSource && !isEditLine(apparent[i]) && !IsBlankLineText(lines[i]))
 					rest[nPane].push_back(lines[i]);
 			}
 		}
-		// A side that is neither the source of the copy nor the base has
-		// changes of its own; the copy must not run over them
-		if (!suggestion.insertOnly)
+		// A pane that is neither the anchor, the changed side nor the base
+		// has changes of its own; the resolution must not run over them
+		auto nonBlankLines = [&](int nPane)
 		{
-			auto nonBlankLines = [&](int nPane)
-			{
-				std::vector<String> lines, nonBlank;
-				GetPaneRealLines(nPane, pdi->dbegin, pdi->dend, lines, nullptr);
-				AppendNonBlankLines(lines, nonBlank);
-				return nonBlank;
-			};
-			for (int nPane = 0; nPane < m_nBuffers; ++nPane)
-			{
-				if (nPane == dstPane || nPane == srcPane || nPane == nBasePane)
-					continue;
-				const std::vector<String> lines = nonBlankLines(nPane);
-				if (lines != nonBlankLines(dstPane) && (srcPane < 0 || lines != nonBlankLines(srcPane)))
-					return false;
-			}
-		}
-		// The other lines must read the same in every pane; where a pane
-		// holds the copied definition instead, it may have none
+			std::vector<String> lines, nonBlank;
+			GetPaneRealLines(nPane, pdi->dbegin, pdi->dend, lines, nullptr);
+			AppendNonBlankLines(lines, nonBlank);
+			return nonBlank;
+		};
 		for (int nPane = 0; nPane < m_nBuffers; ++nPane)
 		{
-			if (nPane == dstPane || rest[nPane] == rest[dstPane])
+			if (nPane == anchorPane || nPane == srcPane || nPane == nBasePane)
 				continue;
-			if (bDstSide || !bHasSource[nPane] || !rest[nPane].empty())
+			const std::vector<String> lines = nonBlankLines(nPane);
+			if (lines != nonBlankLines(anchorPane) && lines != nonBlankLines(srcPane))
 				return false;
 		}
-		return bDstSide || !suggestion.insertOnly || rest[dstPane].empty();
+		// The other lines must read the same in every pane; where a pane
+		// holds the definition somewhere else instead, it may have none
+		for (int nPane = 0; nPane < m_nBuffers; ++nPane)
+		{
+			if (nPane == anchorPane || rest[nPane] == rest[anchorPane])
+				continue;
+			if (bAnchorSide || !bHasSource[nPane] || !rest[nPane].empty())
+				return false;
+		}
+		return true;
 	};
 	const String otherChanges = _("The differences of this definition also contain other changes; resolve them in the merge result first.");
 	std::vector<int> diffs;
@@ -2388,7 +2411,6 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 	{
 		const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
 		bool bInvolved = pdi->dbegin <= nEditEnd && pdi->dend >= nEditBegin;
-		const bool bDstSide = bInvolved;
 		for (const auto& def : sources)
 			bInvolved = bInvolved || (pdi->dbegin <= def.tag.endLine && pdi->dend >= def.tag.startLine);
 		if (!bInvolved)
@@ -2408,15 +2430,16 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 		nRegionEnd = (std::max)(nRegionEnd, pdi->dend);
 	}
 
-	bool bAnyPending = false, bAnyByHand = false;
+	// G3: only pending differences, none decided by hand or by another rule
+	bool bAnyPending = false, bAnyDecided = false;
 	for (int nDiff : diffs)
 	{
 		const ResultSegmentState state = m_resultSegments[m_resultDiffToSegment[nDiff]].state;
 		bAnyPending = bAnyPending || state == ResultSegmentState::Conflict || state == ResultSegmentState::Unresolved;
-		bAnyByHand = bAnyByHand || state == ResultSegmentState::Chosen || state == ResultSegmentState::Edited ||
+		bAnyDecided = bAnyDecided || state == ResultSegmentState::Chosen || state == ResultSegmentState::Edited ||
 			state == ResultSegmentState::Semantic;
 	}
-	if (!bExplicit && (!bAnyPending || bAnyByHand))
+	if (!bAnyPending || bAnyDecided)
 	{
 		message = _("The differences of this definition are already resolved in the merge result.");
 		return false;
@@ -2427,13 +2450,13 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 		return false;
 	}
 
-	// Whole lines of the region as the destination pane should read afterwards
+	// Whole lines of the region as the anchor pane should read afterwards
 	std::vector<String> wanted;
 	{
 		std::vector<String> lines;
-		GetPaneRealLines(dstPane, nRegionBegin, nEditBegin - 1, lines, nullptr);
+		GetPaneRealLines(anchorPane, nRegionBegin, nEditBegin - 1, lines, nullptr);
 		lines.insert(lines.end(), newLines.begin(), newLines.end());
-		GetPaneRealLines(dstPane, nEditEnd + 1, nRegionEnd, lines, nullptr);
+		GetPaneRealLines(anchorPane, nEditEnd + 1, nRegionEnd, lines, nullptr);
 		AppendNonBlankLines(lines, wanted);
 	}
 
@@ -2446,7 +2469,7 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 			return;
 		SemanticRegionItem item;
 		std::vector<String> lines;
-		GetPaneRealLines(dstPane, nBegin, nEndExcl - 1, lines, nullptr);
+		GetPaneRealLines(anchorPane, nBegin, nEndExcl - 1, lines, nullptr);
 		AppendNonBlankLines(lines, item.commonLines);
 		items.push_back(std::move(item));
 	};
@@ -2472,19 +2495,18 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 		if (seg.state == ResultSegmentState::Common || seg.state == ResultSegmentState::Auto ||
 			seg.state == ResultSegmentState::Chosen)
 			addCandidate(seg.srcPanes);
-		if (srcPane >= 0)
-			addCandidate({ srcPane });
-		addCandidate({ dstPane });
+		addCandidate({ srcPane });
+		addCandidate({ anchorPane });
 		for (int nPane = 0; nPane < m_nBuffers; ++nPane)
 		{
-			if (nPane != nBasePane || dstPane == nBasePane)
+			if (nPane != nBasePane || anchorPane == nBasePane)
 				addCandidate({ nPane });
 		}
 		if (pdi->op == OP_DIFF)
 		{
 			// both sides added something: keep both (either order)
-			const int nOther1 = dstPane == 0 ? 1 : 0;
-			const int nOther2 = dstPane == 2 ? 1 : 2;
+			const int nOther1 = anchorPane == 0 ? 1 : 0;
+			const int nOther2 = anchorPane == 2 ? 1 : 2;
 			addCandidate({ nOther1, nOther2 });
 			addCandidate({ nOther2, nOther1 });
 		}
@@ -2493,8 +2515,6 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 	}
 	addCommon(nApparent, nRegionEnd + 1);
 
-	CCrystalTextView* pSource = (m_pMergeResultView != nullptr &&
-		m_pMergeResultView->GetSafeHwnd() != nullptr) ? m_pMergeResultView : nullptr;
 	auto isResolvedWith = [&](int nDiff, const std::vector<int>& panes)
 	{
 		const MergeResultSegment& seg = m_resultSegments[m_resultDiffToSegment[nDiff]];
@@ -2517,36 +2537,28 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 		SemanticRule rule = SemanticRule::DefinitionChange;
 		String reason;
 		const String& name = suggestion.displayName;
-		const String changed = ResultPaneLabel(suggestion.changedPane);
+		const String changed = ResultPaneLabel(srcPane);
+		const String anchor = ResultPaneLabel(anchorPane);
 		switch (suggestion.kind)
 		{
 		case SemanticMerge::SuggestionKind::DefinitionChange:
-			reason = strutils::format_string2(_("One-sided change of %1: only %2 changed it"), name, ResultPaneLabel(srcPane));
+			reason = strutils::format_string2(_("One-sided change of %1: only %2 changed it"), name, changed);
 			break;
 		case SemanticMerge::SuggestionKind::StringLiteral:
 			rule = SemanticRule::LocalizedChange;
-			reason = strutils::format_string2(_("%1: the string literal change of %2 replayed onto the refactored version"), name, changed);
+			reason = strutils::format_string3(_("%1: the string literal change of %2 replayed onto the version of %3"), name, changed, anchor);
 			break;
 		case SemanticMerge::SuggestionKind::ParameterRename:
 			rule = SemanticRule::LocalizedChange;
-			reason = strutils::format_string2(_("%1: the parameter rename of %2 replayed onto the refactored version"), name, changed);
+			reason = strutils::format_string3(_("%1: the parameter rename of %2 replayed onto the version of %3"), name, changed, anchor);
 			break;
 		case SemanticMerge::SuggestionKind::IdentifierRename:
 			rule = SemanticRule::LocalizedChange;
-			reason = strutils::format_string2(_("%1: the identifier rename of %2 replayed onto the refactored version"), name, changed);
+			reason = strutils::format_string3(_("%1: the identifier rename of %2 replayed onto the version of %3"), name, changed, anchor);
 			break;
 		case SemanticMerge::SuggestionKind::CommentedOut:
 			rule = SemanticRule::CommentedOut;
-			reason = strutils::format_string2(_("Commented-out %1 updated with the edit of %2"), name, changed);
-			break;
-		case SemanticMerge::SuggestionKind::Insertion:
-		case SemanticMerge::SuggestionKind::IndependentAdditions:
-			rule = SemanticRule::DefinitionAddition;
-			reason = strutils::format_string1(_("Added definition %1"), name);
-			break;
-		case SemanticMerge::SuggestionKind::AgreedVersion:
-			rule = SemanticRule::AgreedVersion;
-			reason = strutils::format_string1(_("%1: took the version the two other panes agree on"), name);
+			reason = strutils::format_string3(_("%1: commented out by %2, with the edit of %3"), name, anchor, changed);
 			break;
 		}
 		EndSemanticResolution(before, rule, reason);
@@ -2564,21 +2576,20 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 		if (bChanged)
 			recordResolution();
 		else
-			message = _("The merge result already contains this suggestion.");
+			message = _("The merge result already reads this way.");
 		return bChanged;
 	}
 
-	// 2. Otherwise the differences take the destination pane's text and
-	// the lines that differ are rewritten
-	const int nRewritten = RewritePaneLinesInResult(dstPane, nEditBegin, nEditEnd, newLines, diffs, bGroupWithPrevious);
+	// 2. Otherwise the differences take the anchor pane's text and the
+	// lines that differ are rewritten
+	const int nRewritten = RewritePaneLinesInResult(anchorPane, nEditBegin, nEditEnd, newLines, diffs, bGroupWithPrevious);
 	if (nRewritten < 0)
 		message = failed;
 	else if (nRewritten == 0)
-		message = _("The merge result already contains this suggestion.");
+		message = _("The merge result already reads this way.");
 	else
 		recordResolution();
 	return nRewritten > 0;
-
 }
 
 /**
@@ -2660,7 +2671,11 @@ bool CMergeDoc::ResultResolveWithText(int nDiff, const String& resolvedText, boo
  * The merged text is only used when the file still parses as well with
  * it as with either side's version of the conflict.
  */
-bool CMergeDoc::TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPrevious)
+/**
+ * @brief R1 within one conflict: both sides added lines at the same place
+ * and one side's addition holds the other's whole: take that side.
+ */
+bool CMergeDoc::TryContainedAdditionToResult(int nDiff, bool& bGroupWithPrevious)
 {
 	if (!m_bResultBuilt || m_nBuffers != 3 || nDiff < 0 || nDiff >= m_diffList.GetSize() ||
 		!IsResultDiffPending(nDiff))
@@ -2668,12 +2683,51 @@ bool CMergeDoc::TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPreviou
 	const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
 	if (pdi == nullptr || pdi->op != OP_DIFF)
 		return false;
+	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
+	std::vector<String> baseLines, mineLines, theirsLines;
+	GetPaneRealLines(panes.nBasePane, pdi->dbegin, pdi->dend, baseLines, nullptr);
+	if (!SemanticMerge::SqueezeNonBlankLines(baseLines).empty())
+		return false;
+	GetPaneRealLines(panes.nMinePane, pdi->dbegin, pdi->dend, mineLines, nullptr);
+	GetPaneRealLines(panes.nTheirsPane, pdi->dbegin, pdi->dend, theirsLines, nullptr);
+	const SemanticMerge::DuplicateDrop drop = SemanticMerge::ChooseContainedAdditionToDrop(mineLines, theirsLines);
+	if (drop == SemanticMerge::DuplicateDrop::None)
+		return false;
+	const int nKeep = drop == SemanticMerge::DuplicateDrop::Theirs ? panes.nMinePane : panes.nTheirsPane;
+	const int nDrop = drop == SemanticMerge::DuplicateDrop::Theirs ? panes.nTheirsPane : panes.nMinePane;
+
+	const SemanticResolutionSnapshot before = BeginSemanticResolution();
+	ResultChooseSource(nDiff, nKeep, bGroupWithPrevious);
+	bGroupWithPrevious = true;
+	EndSemanticResolution(before, SemanticRule::DuplicateAddition,
+		strutils::format_string2(_("Duplicate addition: %1 added the same lines as %2, and more; took %1"),
+			ResultPaneLabel(nKeep), ResultPaneLabel(nDrop)));
+	return true;
+}
+
+bool CMergeDoc::TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPrevious, String& why)
+{
+	if (!m_bResultBuilt || m_nBuffers != 3 || nDiff < 0 || nDiff >= m_diffList.GetSize() ||
+		!IsResultDiffPending(nDiff))
+	{
+		why = _("the conflict is not pending.");
+		return false;
+	}
+	const DIFFRANGE* pdi = m_diffList.DiffRangeAt(nDiff);
+	if (pdi == nullptr || pdi->op != OP_DIFF)
+	{
+		why = _("the difference is not a conflict.");
+		return false;
+	}
 
 	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
 	CTreeSitterParser* pParser = GetTreeSitterParser(panes.nMergeDestPane);
 	const CTreeSitterLanguage* pLang = (pParser != nullptr && pParser->HasLanguage()) ? pParser->GetLanguage() : nullptr;
 	if (pLang == nullptr)
+	{
+		why = _("there is no tree-sitter grammar for this file type.");
 		return false;
+	}
 
 	const String baseText = GetPaneApparentLinesText(panes.nBasePane, pdi->dbegin, pdi->dend, nullptr);
 	const String mineText = GetPaneApparentLinesText(panes.nMinePane, pdi->dbegin, pdi->dend, nullptr);
@@ -2681,10 +2735,15 @@ bool CMergeDoc::TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPreviou
 	String merged;
 	if (!SemanticMerge::MergeTokensThreeWay(baseText, mineText, theirsText,
 			SemanticMerge::TraitsForLanguage(pLang->GetName()), merged))
+	{
+		why = IsBlankLineText(baseText) ?
+			_("both sides added different lines at the same place; which goes first is yours to decide.") :
+			_("the two sides changed the same words, or one side changed too much to line the changes up.");
 		return false;
+	}
 
-	// The merge must not break the syntax: compare the whole file with the
-	// conflict merged against the file with either side's version of it
+	// G4: compare the whole file with the conflict merged against the file
+	// with either side's version of it
 	const int nLastLine = m_ptBuf[panes.nBasePane]->GetLineCount() - 1;
 	const String before = GetPaneApparentLinesText(panes.nBasePane, 0, pdi->dbegin - 1, nullptr);
 	const String after = GetPaneApparentLinesText(panes.nBasePane, pdi->dend + 1, nLastLine, nullptr);
@@ -2692,11 +2751,17 @@ bool CMergeDoc::TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPreviou
 	const int nMineErrors = pLang->CountSyntaxErrors(before + mineText + after);
 	const int nTheirsErrors = pLang->CountSyntaxErrors(before + theirsText + after);
 	if (nMergedErrors < 0 || nMergedErrors > (std::max)(nMineErrors, nTheirsErrors))
+	{
+		why = _("the merged lines would add syntax errors.");
 		return false;
+	}
 
 	const SemanticResolutionSnapshot snapshot = BeginSemanticResolution();
 	if (!ResultResolveWithText(nDiff, merged, bGroupWithPrevious))
+	{
+		why = _("the merge result could not be changed.");
 		return false;
+	}
 	bGroupWithPrevious = true;
 	EndSemanticResolution(snapshot, SemanticRule::TokenMerge,
 		strutils::format_string2(_("Token merge: %1 and %2 changed different parts of these lines"),
@@ -2778,23 +2843,6 @@ bool HasLinesToItself(const std::vector<CTreeSitterParser::TagRange>& tags, cons
 	return true;
 }
 
-std::vector<String> NonBlankSqueezed(const std::vector<String>& lines)
-{
-	std::vector<String> squeezed;
-	for (const String& line : lines)
-	{
-		String text;
-		for (tchar_t ch : line)
-		{
-			if (ch != _T(' ') && ch != _T('\t'))
-				text += ch;
-		}
-		if (!text.empty())
-			squeezed.push_back(std::move(text));
-	}
-	return squeezed;
-}
-
 }
 
 /**
@@ -2821,14 +2869,20 @@ bool CMergeDoc::GetDefinitionLines(int nPane, int nStartLine, int nEndLine,
  *
  * @param [in] nDiff An unresolved conflict inside the definition's old place.
  */
-bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevious)
+bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevious, String& why)
 {
 	if (!m_bResultBuilt || m_nBuffers != 3 || nDiff < 0 || nDiff >= m_diffList.GetSize() ||
 		static_cast<int>(m_resultDiffToSegment.size()) != m_diffList.GetSize() || !IsResultDiffPending(nDiff))
+	{
+		why = _("the conflict is not pending.");
 		return false;
+	}
 	const DIFFRANGE* pConflict = m_diffList.DiffRangeAt(nDiff);
 	if (pConflict == nullptr || pConflict->op != OP_DIFF)
+	{
+		why = _("the difference is not a conflict.");
 		return false;
+	}
 
 	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
 	const int nBase = panes.nBasePane;
@@ -2837,16 +2891,15 @@ bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevi
 	for (int nPane = 0; nPane < 3; ++nPane)
 	{
 		CTreeSitterParser* pParser = GetTreeSitterParser(nPane);
-		if (pParser == nullptr || !pParser->HasLanguage())
-			return false;
-		pLang = pParser->GetLanguage();
+		pLang = (pParser != nullptr && pParser->HasLanguage()) ? pParser->GetLanguage() : nullptr;
 		if (pLang == nullptr)
+		{
+			why = _("there is no tree-sitter grammar for this file type.");
 			return false;
+		}
 		tags[nPane] = WholeLineTags(pParser->GetTagRanges(), *m_ptBuf[nPane],
 			SemanticMerge::TraitsForLanguage(pLang->GetName()).lineCommentPrefixes);
 	}
-	if (pLang == nullptr)
-		return false;
 
 	// The innermost base definition the conflict lies in
 	const CTreeSitterParser::TagRange* pBaseTag = nullptr;
@@ -2857,34 +2910,34 @@ bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevi
 			pBaseTag = &tag;
 	}
 	if (pBaseTag == nullptr)
+	{
+		why = _("the conflict is not inside a definition.");
 		return false;
+	}
 	CTreeSitterParser::TagRange sideTags[3];
 	for (int nPane = 0; nPane < 3; ++nPane)
 	{
 		if (!SemanticMerge::TryFindUniqueTagByName(tags[nPane], pBaseTag->name, sideTags[nPane]))
+		{
+			why = _("the definition is not there exactly once in every pane.");
 			return false;
+		}
 	}
 	const CTreeSitterParser::TagRange& baseTag = sideTags[nBase];
-	auto overlapsBase = [&](const CTreeSitterParser::TagRange& tag)
-	{
-		return tag.startLine <= baseTag.endLine && tag.endLine >= baseTag.startLine;
-	};
+	const CTreeSitterParser::TagRange& mineTag = sideTags[panes.nMinePane];
+	const CTreeSitterParser::TagRange& theirsTag = sideTags[panes.nTheirsPane];
 
 	// One side (the mover) has the definition somewhere else, the other
 	// (the editor) still has it in place
-	int nMover = -1, nEditor = -1;
-	if (!overlapsBase(sideTags[panes.nMinePane]) && overlapsBase(sideTags[panes.nTheirsPane]))
+	const SemanticMerge::MovedSide moved = SemanticMerge::DetectMovedDefinition(baseTag.startLine, baseTag.endLine,
+		mineTag.startLine, mineTag.endLine, theirsTag.startLine, theirsTag.endLine);
+	if (moved == SemanticMerge::MovedSide::None)
 	{
-		nMover = panes.nMinePane;
-		nEditor = panes.nTheirsPane;
-	}
-	else if (!overlapsBase(sideTags[panes.nTheirsPane]) && overlapsBase(sideTags[panes.nMinePane]))
-	{
-		nMover = panes.nTheirsPane;
-		nEditor = panes.nMinePane;
-	}
-	else
+		why = _("neither side moved the definition while the other kept it in place.");
 		return false;
+	}
+	const int nMover = moved == SemanticMerge::MovedSide::Mine ? panes.nMinePane : panes.nTheirsPane;
+	const int nEditor = moved == SemanticMerge::MovedSide::Mine ? panes.nTheirsPane : panes.nMinePane;
 	const CTreeSitterParser::TagRange& moverTag = sideTags[nMover];
 	const CTreeSitterParser::TagRange& editorTag = sideTags[nEditor];
 
@@ -2896,7 +2949,10 @@ bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevi
 		if (!HasLinesToItself(tags[nPane], sideTags[nPane]) ||
 			!GetDefinitionLines(nPane, sideTags[nPane].startLine, sideTags[nPane].endLine,
 				defLines[nPane], defApparent[nPane]))
+		{
+			why = _("the definition shares lines with another definition.");
 			return false;
+		}
 	}
 
 	// The result is to read like the mover's file, with the definition in
@@ -2912,7 +2968,7 @@ bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevi
 			if (pWithout == nullptr || apparent[n] < pWithout->startLine || apparent[n] > pWithout->endLine)
 				kept.push_back(lines[n]);
 		}
-		return NonBlankSqueezed(kept);
+		return SemanticMerge::SqueezeNonBlankLines(kept);
 	};
 	std::vector<int> diffs;
 	bool bConflictIsOld = false;
@@ -2930,57 +2986,65 @@ bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevi
 			continue;
 		const int nSegment = m_resultDiffToSegment[i];
 		if (nSegment < 0)
+		{
+			why = _("the merge result no longer matches the compared files.");
 			return false;
+		}
 		const ResultSegmentState state = m_resultSegments[nSegment].state;
 		if (state == ResultSegmentState::Chosen || state == ResultSegmentState::Edited ||
 			state == ResultSegmentState::Semantic)
-			return false; // already decided
-		if (paneLines(nEditor, pdi, bOld ? &editorTag : nullptr) != paneLines(nBase, pdi, bOld ? &baseTag : nullptr))
+		{
+			why = _("a difference of the definition is already resolved.");
 			return false;
+		}
+		if (paneLines(nEditor, pdi, bOld ? &editorTag : nullptr) != paneLines(nBase, pdi, bOld ? &baseTag : nullptr))
+		{
+			why = _("the editing side also changed other code around the definition.");
+			return false;
+		}
 		bConflictIsOld = bConflictIsOld || (bOld && i == nDiff);
 		diffs.push_back(i);
 		nRegionBegin = (std::min)(nRegionBegin, pdi->dbegin);
 		nRegionEnd = (std::max)(nRegionEnd, pdi->dend);
 	}
-	if (!bConflictIsOld || !IsResultCommonTextIntact(nRegionBegin, nRegionEnd))
+	if (!bConflictIsOld)
+	{
+		why = _("the conflict is not at the definition's old place.");
 		return false;
+	}
+	if (!IsResultCommonTextIntact(nRegionBegin, nRegionEnd))
+	{
+		why = _("the merge result was edited by hand around the definition.");
+		return false;
+	}
 
 	// The definition as it should read: what the editor did to it, applied
 	// to the mover's copy
-	auto joinLines = [](const std::vector<String>& lines)
-	{
-		String text;
-		for (const String& line : lines)
-			text += line + _T("\n");
-		return text;
-	};
-	String mergedDef;
-	if (defLines[nMover] == defLines[nBase])
-		mergedDef = joinLines(defLines[nEditor]);
-	else if (NonBlankSqueezed(defLines[nEditor]) == NonBlankSqueezed(defLines[nBase]))
-		return false; // nothing but the move: the line merge does that
-	else if (!SemanticMerge::MergeTokensThreeWay(joinLines(defLines[nBase]), joinLines(defLines[nMover]),
-			joinLines(defLines[nEditor]), SemanticMerge::TraitsForLanguage(pLang->GetName()), mergedDef))
-		return false;
 	std::vector<String> mergedLines;
-	SplitTextIntoLines(mergedDef, mergedLines);
-	if (!mergedLines.empty() && mergedLines.back().empty())
-		mergedLines.pop_back(); // the text ends with a line end
-
-	// The mover's file must parse as well with the merged definition as before
-	const int nLastLine = m_ptBuf[nMover]->GetLineCount() - 1;
-	const String fileBefore = GetPaneApparentLinesText(nMover, 0, moverTag.startLine - 1, nullptr);
-	const String fileAfter = GetPaneApparentLinesText(nMover, moverTag.endLine + 1, nLastLine, nullptr);
-	const int nMergedErrors = pLang->CountSyntaxErrors(fileBefore + mergedDef + fileAfter);
-	const int nMoverErrors = pLang->CountSyntaxErrors(
-		fileBefore + GetPaneApparentLinesText(nMover, moverTag.startLine, moverTag.endLine, nullptr) + fileAfter);
-	if (nMergedErrors < 0 || nMergedErrors > nMoverErrors)
+	if (!SemanticMerge::MergeMovedDefinition(defLines[nBase], defLines[nMover], defLines[nEditor],
+			SemanticMerge::TraitsForLanguage(pLang->GetName()), mergedLines))
+	{
+		why = _("the editing side only re-laid the definition out, or both sides changed the same words of it.");
 		return false;
+	}
+
+	// G4
+	String mergedText;
+	for (const String& line : mergedLines)
+		mergedText += line + _T("\n");
+	if (!IsSemanticResultSyntaxOk(nMover, moverTag.startLine, moverTag.endLine, mergedText))
+	{
+		why = _("the merged definition would add syntax errors.");
+		return false;
+	}
 
 	const SemanticResolutionSnapshot before = BeginSemanticResolution();
 	if (RewritePaneLinesInResult(nMover, moverTag.startLine, moverTag.endLine, mergedLines, diffs,
 		bGroupWithPrevious) <= 0)
+	{
+		why = _("the merge result could not be changed.");
 		return false;
+	}
 	EndSemanticResolution(before, SemanticRule::MovedDefinition,
 		strutils::format_string3(_("Moved definition %1: %2 moved it, %3 edited it"),
 			ucr::toTString(baseTag.name), ResultPaneLabel(nMover), ResultPaneLabel(nEditor)));
@@ -3029,11 +3093,11 @@ int CMergeDoc::ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious)
 			--nLastLine;
 		return (pdi->op == OnlyPaneOp(nPane) && pdi->dend >= nLastLine) ? nDiff : -1;
 	};
-	auto squeezedLines = [&](int nPane, int nBegin, int nEnd)
+	auto paneLines = [&](int nPane, int nBegin, int nEnd)
 	{
 		std::vector<String> lines;
 		GetPaneRealLines(nPane, nBegin, nEnd, lines, nullptr);
-		return NonBlankSqueezed(lines);
+		return lines;
 	};
 
 	int nResolved = 0;
@@ -3050,28 +3114,26 @@ int CMergeDoc::ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious)
 			continue;
 		// the same definition: same text, in the same enclosing definition
 		if (EnclosingTagName(tags[nMine], mineTag) != EnclosingTagName(tags[nTheirs], theirsTag) ||
-			squeezedLines(nMine, mineTag.startLine, mineTag.endLine) !=
-			squeezedLines(nTheirs, theirsTag.startLine, theirsTag.endLine))
+			SemanticMerge::SqueezeNonBlankLines(paneLines(nMine, mineTag.startLine, mineTag.endLine)) !=
+			SemanticMerge::SqueezeNonBlankLines(paneLines(nTheirs, theirsTag.startLine, theirsTag.endLine)))
 			continue;
 		const int nMineDiff = additionDiff(nMine, mineTag);
 		const int nTheirsDiff = additionDiff(nTheirs, theirsTag);
 		if (nMineDiff == -1 || nTheirsDiff == -1 || nMineDiff == nTheirsDiff)
 			continue;
 
-		// Leave out the addition that has nothing the other one lacks
-		// (a doc comment in front of the definition is in both)
 		const DIFFRANGE* pMine = m_diffList.DiffRangeAt(nMineDiff);
 		const DIFFRANGE* pTheirs = m_diffList.DiffRangeAt(nTheirsDiff);
-		std::vector<String> mineLines = squeezedLines(nMine, pMine->dbegin, pMine->dend);
-		std::vector<String> theirsLines = squeezedLines(nTheirs, pTheirs->dbegin, pTheirs->dend);
-		std::sort(mineLines.begin(), mineLines.end());
-		std::sort(theirsLines.begin(), theirsLines.end());
-		int nDropDiff = -1;
-		if (std::includes(mineLines.begin(), mineLines.end(), theirsLines.begin(), theirsLines.end()))
-			nDropDiff = nTheirsDiff;
-		else if (std::includes(theirsLines.begin(), theirsLines.end(), mineLines.begin(), mineLines.end()))
-			nDropDiff = nMineDiff;
-		else
+		const SemanticMerge::DuplicateDrop drop = SemanticMerge::ChooseDuplicateAdditionToDrop(
+			paneLines(nMine, pMine->dbegin, pMine->dend), paneLines(nTheirs, pTheirs->dbegin, pTheirs->dend));
+		if (drop == SemanticMerge::DuplicateDrop::None)
+			continue;
+		const bool bDropMine = drop == SemanticMerge::DuplicateDrop::Mine;
+		const int nDropDiff = bDropMine ? nMineDiff : nTheirsDiff;
+		const DIFFRANGE* pDrop = bDropMine ? pMine : pTheirs;
+
+		// G4: the dropping side's file without its copy
+		if (!IsSemanticResultSyntaxOk(bDropMine ? nMine : nTheirs, pDrop->dbegin, pDrop->dend, String()))
 			continue;
 
 		const SemanticResolutionSnapshot before = BeginSemanticResolution();

@@ -27,7 +27,6 @@ PropEditor::PropEditor(COptionsMgr *optionsMgr)
 , m_nHiliteSyntaxMode(0)
 , m_bTreeSitterOccurrenceHighlight(false)
 , m_bTreeSitterBreadcrumb(false)
-, m_bSemanticMergeExperimental(false)
 , m_nTabType(-1)
 , m_nTabSize(0)
 , m_bAllowMixedEol(false)
@@ -40,7 +39,6 @@ PropEditor::PropEditor(COptionsMgr *optionsMgr)
 	BindOption(OPT_SYNTAX_HIGHLIGHT_MODE, m_nHiliteSyntaxMode, IDC_HILITE_SYNTAX_MODE, DDX_CBIndex);
 	BindOption(OPT_TREE_SITTER_OCCURRENCE_HIGHLIGHT, m_bTreeSitterOccurrenceHighlight, IDC_TREE_SITTER_OCCURRENCE_CHECK, DDX_Check);
 	BindOption(OPT_TREE_SITTER_BREADCRUMB, m_bTreeSitterBreadcrumb, IDC_TREE_SITTER_BREADCRUMB_CHECK, DDX_Check);
-	BindOption(OPT_SEMANTIC_MERGE_EXPERIMENTAL, m_bSemanticMergeExperimental, IDC_SEMANTIC_MERGE_CHECK, DDX_Check);
 	BindOption(OPT_ALLOW_MIXED_EOL, m_bAllowMixedEol, IDC_MIXED_EOL, DDX_Check);
 	BindOptionCustom(OPT_RENDERING_MODE, m_nRenderingMode, IDC_RENDERING_MODE, DDX_CBIndex,
 		+[](int v) { return v + 1; }, +[](int v) { return (v - 1); });

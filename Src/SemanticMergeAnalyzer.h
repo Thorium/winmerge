@@ -93,13 +93,6 @@ struct DiffInfo
 	 */
 	int anchorPane = -1;
 	int anchorLine = -1;
-	/**
-	 * Allow the destination pane that holds the single changed version to
-	 * adopt the definition the two other panes agree on (catch-up/revert).
-	 * Only interactive, previewed commands enable this; unattended merges
-	 * (CLI, copy-all) must never silently overwrite the changed version.
-	 */
-	bool allowAdoptAgreed = false;
 };
 
 struct DefinitionInfo
@@ -109,78 +102,76 @@ struct DefinitionInfo
 	String text;
 };
 
+/** @brief Which pane is the common ancestor and which are the two sides. */
+struct MergeRoles
+{
+	int base = 1;
+	int mine = 0;
+	int theirs = 2;
+};
+
 /** @brief What kind of change a suggestion carries over. */
 enum class SuggestionKind
 {
-	DefinitionChange,     /**< whole definition from the only side that changed it */
-	StringLiteral,        /**< one string literal change replayed onto a refactored definition */
-	ParameterRename,      /**< one parameter rename replayed onto a refactored definition */
-	IdentifierRename,     /**< one identifier rename replayed onto a refactored definition */
-	CommentedOut,         /**< edited definition written into its commented-out copy */
-	Insertion,            /**< definition added on one side, inserted next to its neighbour */
-	IndependentAdditions, /**< definitions added by either side, inserted together */
-	AgreedVersion,        /**< the version the two other panes agree on */
+	DefinitionChange, /**< R4: whole definition from the only side that changed it */
+	StringLiteral,    /**< R5: one string literal change replayed onto the other side's refactoring */
+	ParameterRename,  /**< R5: one parameter rename replayed onto the other side's refactoring */
+	IdentifierRename, /**< R5: one identifier rename replayed onto the other side's refactoring */
+	CommentedOut,     /**< R6: edited definition written into the other side's commented-out copy */
 };
 
-/** @brief A proposed safe semantic merge for one destination definition. */
+/**
+ * @brief A definition-level resolution of a conflict.
+ *
+ * The result reads like anchorPane with defs[anchorPane] replaced by
+ * replacementText.
+ */
 struct Suggestion
 {
 	SuggestionKind kind = SuggestionKind::DefinitionChange;
 	TagRange tags[3];
 	DefinitionInfo defs[3];
-	int unchangedPane = -1;
-	int changedPane = -1;
-	int srcPane = -1; /**< pane whose text is applied; equals changedPane unless adopting the agreed version */
-	bool insertOnly = false;
-	int insertLine = -1;
-	int insertChar = 0;
+	int unchangedPane = -1; /**< the base */
+	int changedPane = -1;   /**< the side whose change is carried over */
+	int anchorPane = -1;    /**< the pane whose definition lines the replacement rewrites */
 	String replacementText;
-	String previewText;
 	String displayName;
-	/** Source definitions (pane and range) whose text an insert-only suggestion inserts. */
-	std::vector<DefinitionInfo> insertedDefs;
 };
 
 /**
- * @brief Builds semantic merge suggestions for a 3-way comparison.
+ * @brief Builds definition-level resolutions (rules R4-R6 of
+ * Docs/Developers/SemanticMerge.md) for conflicts of a 3-way comparison.
  *
- * The caller is responsible for option/read-only/diff-index validation;
- * the analyzer validates pane count and tree-sitter availability.
+ * The analyzer validates pane count, roles and tree-sitter availability;
+ * everything else is the caller's.
  */
 class Analyzer
 {
 public:
-	Analyzer(const PaneData* panes, int nPanes, const LanguageTraits& traits = LanguageTraits());
+	Analyzer(const PaneData* panes, int nPanes, const LanguageTraits& traits = LanguageTraits(),
+		const MergeRoles& roles = MergeRoles());
 
 	/**
-	 * @brief Build a suggestion for a single difference.
-	 * @return true when a safe suggestion exists; otherwise false with an
+	 * @brief Build a resolution for a single difference.
+	 * @return true when a safe resolution exists; otherwise false with an
 	 *         explanatory message.
 	 */
-	bool TryBuildSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const;
-
-	/**
-	 * @brief Collect non-overlapping suggestions for the whole file.
-	 * @param diffs  All significant differences, in document order.
-	 *
-	 * Suggestions are returned sorted by descending destination position so
-	 * they can be applied in order without invalidating later ranges.
-	 */
-	bool TryCollectSuggestions(int dstPane, const std::vector<DiffInfo>& diffs, std::vector<Suggestion>& suggestions, String& message) const;
+	bool TryBuildSuggestion(const DiffInfo& diff, Suggestion& suggestion, String& message) const;
 
 private:
-	bool TryBuildInsertionSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion) const;
 	std::vector<std::string> CollectCandidateDefinitionNames(const DiffInfo& diff) const;
-	bool TryReconcileTagsByName(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const;
-	bool FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, String& message, bool allowAdoptAgreed = false) const;
-	bool TryBuildCommentedBlockSuggestion(int dstPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const;
-	bool TryCollectIndependentAdditionSuggestions(int dstPane, std::vector<Suggestion>& suggestions, String& message) const;
+	bool TryReconcileTagsByName(const DiffInfo& diff, Suggestion& suggestion, String& message) const;
+	bool FinalizeStandardSuggestion(Suggestion& suggestion, String& message) const;
+	bool TryBuildCommentedBlockSuggestion(int commentPane, const DiffInfo& diff, Suggestion& suggestion, String& message) const;
 	bool AllPanesHaveLanguage() const;
+	bool RolesAreValid() const;
 
 	const PaneData* m_panes;
 	int m_nPanes;
 	LanguageTraits m_traits;
+	MergeRoles m_roles;
 };
+
 
 // ---------------------------------------------------------------------------
 // Internal building blocks, exposed for unit testing.
@@ -246,5 +237,55 @@ bool MergeTokensThreeWay(const String& baseText, const String& oursText, const S
 
 /** @brief Find the definition with the given name; fails if absent or ambiguous. */
 bool TryFindUniqueTagByName(const std::vector<TagRange>& tags, const std::string& name, TagRange& found);
+
+/** @brief The lines with spaces and tabs removed, blank lines left out: text compared as content, not layout. */
+std::vector<String> SqueezeNonBlankLines(const std::vector<String>& lines);
+
+/** @brief Which side of a duplicate addition (R1) is left out. */
+enum class DuplicateDrop
+{
+	None,   /**< neither addition holds all the other has: keep both */
+	Theirs, /**< mine has everything theirs has */
+	Mine,   /**< theirs has everything mine has */
+};
+
+/**
+ * @brief R1: both sides added the same definition, each in its own place.
+ * The addition that has nothing the other one lacks is left out (a doc
+ * comment in front of the definition may be in one addition only).
+ * @param mineLines, theirsLines The lines of each side's whole addition.
+ */
+DuplicateDrop ChooseDuplicateAdditionToDrop(const std::vector<String>& mineLines, const std::vector<String>& theirsLines);
+
+/**
+ * @brief R1 within one conflict: both sides added lines at the same place,
+ * and one side's addition appears whole, in order, inside the other's.
+ * @return The side whose addition holds the other's, None when neither does
+ *         or when they are the same.
+ */
+DuplicateDrop ChooseContainedAdditionToDrop(const std::vector<String>& mineLines, const std::vector<String>& theirsLines);
+
+/** @brief Which side moved a definition (R3). */
+enum class MovedSide
+{
+	None,
+	Mine,
+	Theirs,
+};
+
+/**
+ * @brief R3: the side whose definition no longer overlaps its base position,
+ * while the other side's still does. Ranges are in the aligned line numbers
+ * all three panes share.
+ */
+MovedSide DetectMovedDefinition(int baseStart, int baseEnd, int mineStart, int mineEnd, int theirsStart, int theirsEnd);
+
+/**
+ * @brief R3: the moved definition with the editor's change applied.
+ * @return false when the editor only re-laid the definition out (a pure move,
+ *         which the line merge handles) or the changes cannot be merged.
+ */
+bool MergeMovedDefinition(const std::vector<String>& baseLines, const std::vector<String>& moverLines,
+	const std::vector<String>& editorLines, const LanguageTraits& traits, std::vector<String>& mergedLines);
 
 } // namespace SemanticMerge

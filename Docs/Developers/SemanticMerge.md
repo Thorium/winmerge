@@ -1,9 +1,9 @@
 # Semantic Merge
 
 Specification of the tree-sitter based semantic conflict resolution in the
-3-way merge. Sections 1–9 define the intended behaviour. Section 10 lists
-where the code on `feature/tree-sitter-semantic-merge-v3` differs from it
-(state of 2026-11-18); those items are the remaining work.
+3-way merge. Sections 1–9 define the behaviour, which the code on
+`feature/tree-sitter-semantic-merge-v3` implements (2026-11-18). Section 10
+lists what is still open.
 
 ## 1. Purpose
 
@@ -50,29 +50,41 @@ Out of scope, and refused:
 
 ## 4. Enabling
 
-One option: **Resolve conflicts semantically (experimental)**
-(`Settings/SemanticMerge`), on the Merge Result options page, off by default.
+One option, `OPT_SEMANTIC_MERGE` (`Settings/SemanticMerge`), off by default:
 
-Requirements, checked per file and shown when unmet:
+- **Options > Editor > Compare/Merge**: "Resolve conflicts semantically in the
+  Merge Result Pane (experimental, tree-sitter)", below "Use Merge Result
+  Pane";
+- **Merge > Semantic Merge > Resolve Conflicts Semantically (Experimental)**,
+  a check item for the same option.
 
-- three files are compared and the result pane is active;
+Requirements (`CMergeDoc::GetSemanticMergeUnavailableReason`, shown when a
+command runs without them):
+
+- three files are compared and the Merge Result Pane option is on;
 - a grammar exists for the file type, and all three panes parse with it.
 
-The option does not depend on the syntax highlighting mode. Turning
-highlighting off does not turn semantic merge off, and enabling semantic merge
-does not change highlighting.
+The option does not depend on the syntax highlighting mode. When highlighting
+does not use a tree-sitter parser, the view creates one for the file type
+(`CMergeEditView::GetTreeSitterParser`), and enabling semantic merge does not
+change highlighting.
 
 ## 5. Rules
 
 All entry points (section 6) run the same pipeline:
 
 1. R1 runs once over the whole file.
-2. For each conflict in document order, R2 to R6 are tried in this order. The
-   first rule that succeeds resolves the conflict, and the next conflict is
-   taken.
+2. For each conflict in document order, R1 within the conflict, then R2 to R6,
+   are tried in this order. The first rule that succeeds resolves the
+   conflict, and the next conflict is taken.
 
-The order goes from the narrowest change to the widest. R2 touches only the
-conflict's own lines. R3 to R6 rewrite a whole definition.
+The order goes from the narrowest change to the widest. R1 and R2 touch only
+the conflict's own lines. R3 to R6 rewrite a whole definition.
+
+Code: `CMergeDoc::DoSemanticMergeConflictsToResult` (whole file) and
+`TryResolveConflictSemantically` (one conflict), in `MergeDoc.cpp`. The
+decisions are MFC-free functions in `SemanticMergeAnalyzer.{h,cpp}`; the
+`CMergeDoc` side gathers the lines and applies the result.
 
 Guards common to all rules:
 
@@ -81,7 +93,7 @@ Guards common to all rules:
   pane.
 - **G2 Unique names.** A definition is matched across panes by name, and only
   when the name occurs exactly once in each pane involved.
-- **G3 Hands off decided segments.** A segment that is Chosen or Edited is
+- **G3 Hands off decided segments.** A segment that is Chosen, Edited or Semantic is
   never rewritten, and neither is one whose common text around it was edited
   (`IsResultCommonTextIntact`).
 - **G4 Syntax check.** The file with the resolution applied must not have more
@@ -106,6 +118,13 @@ result twice.
   out (taken from base). The other copy stays.
 - **Refuses:** different texts, different enclosing definitions, or neither
   addition being a superset of the other.
+- **Code:** `ResolveDuplicateAdditionsInResult`, deciding with
+  `ChooseDuplicateAdditionToDrop`.
+
+Within one conflict: when both additions land in the same conflict (base empty
+there) and one side's added lines appear whole and in the same order inside the
+other side's, the side with more is taken (`TryContainedAdditionToResult`,
+`ChooseContainedAdditionToDrop`). Two different additions stay a conflict.
 
 ### R2 Token merge
 
@@ -133,6 +152,8 @@ Volume cap: beyond that size the alignment is no longer reliable. Replay
 showed this cap is what keeps out a renamed call combined with a re-typed
 argument.
 
+Code: `TryTokenMergeConflictToResult`, deciding with `MergeTokensThreeWay`.
+
 ### R3 Moved definition
 
 One side moved a definition and the other side edited it where it was. The
@@ -152,6 +173,8 @@ addition elsewhere.
   - an editor that only reformatted (the line merge already handles a pure
     move);
   - token merge failing.
+- **Code:** `TryMovedDefinitionMergeToResult`, deciding with
+  `DetectMovedDefinition` and `MergeMovedDefinition`.
 
 ### R4 One-sided definition change
 
@@ -170,7 +193,8 @@ difference block.
 One side refactored a definition heavily, which defeats R2's volume cap. The
 other side made exactly one small change.
 
-- **Applies when** the small side's change against the base is exactly one of:
+- **Applies when** the small side's change against the base is exactly one of
+  the following, and nothing else (undoing it gives the base text back):
   - one string literal changed, and the old literal occurs exactly once in
     the refactored version;
   - one parameter renamed together with exactly one use site, and the old
@@ -194,11 +218,14 @@ One side commented a definition out line by line. The other side edited it.
 - **Refuses:** a block that does not match the base definition after
   uncommenting, mixed prefixes, or block comments.
 
-### Removed from the pipeline
+R4–R6 are decided by `SemanticMerge::Analyzer::TryBuildSuggestion`, which
+returns the pane to rewrite (`anchorPane`) and its new definition text, and
+applied by `CMergeDoc::ApplySemanticSuggestionToResult`.
 
-These exist in the current code (section 10). They are not part of the
-feature because the line merge already handles them, or because they are not
-merges:
+### Not rules
+
+These were in earlier versions of the branch and were removed, because the
+line merge already handles them or because they are not merges:
 
 - Inserting a one-sided addition at its definition neighbour's position: a
   one-sided addition is not a conflict.
@@ -208,16 +235,19 @@ merges:
 
 ## 6. Entry points
 
-| Entry point | Does |
-|---|---|
-| Auto Merge (toolbar, `Merge > Auto Merge`) with the option on | Line merge, then the pipeline over all remaining conflicts. |
-| **Resolve Conflict Semantically** (`Ctrl+Alt+Shift+M`), from the result pane or a compared pane | The pipeline on the current conflict only. If no rule applies, a message names each rule and why it declined. |
-| **Resolve All Conflicts Semantically** (`Ctrl+Alt+Shift+A`) | The pipeline over all pending conflicts, without re-running the line merge. |
-| Command line `-semantic` together with `/al`, `/am` or `/ar` | Enables the option for this run only, then behaves like Auto Merge. With `-o` and `-noninteractive` the result is saved. |
+| Entry point | Does | Code |
+|---|---|---|
+| Auto Merge (toolbar, `Merge > Auto Merge`) with the option on | The pipeline over all conflicts, then the non-conflicting differences are merged as before. | `ApplyAutoMergeToResult` |
+| **Resolve Conflict Semantically** (`Ctrl+Alt+Shift+M`), from the result pane or a compared pane | R2–R6 on the conflict at the cursor (from a compared pane, the definition under the cursor is preferred). If no rule applies, a message names each rule and why it declined. | `ResolveConflictSemantically` |
+| **Resolve All Conflicts Semantically** (`Ctrl+Alt+Shift+A`) | The pipeline over all pending conflicts, without the line merge. | `DoSemanticMergeConflictsToResult` |
+| Command line `-semantic` together with `/al`, `/am` or `/ar` | Turns the option on for this run only, then behaves like Auto Merge. With `-o` and `-noninteractive` the result is saved. | `MergeCmdLineInfo::m_bSemanticMerge` |
 
-Commands are disabled, with the reason in the tooltip, when section 4's
-requirements are unmet. There is no preview dialog: the result pane shows the
-change, and Undo reverts it.
+The commands are in **Merge > Semantic Merge** and in the result pane's
+context menu. Without a merge session they start one, as Auto Merge does.
+They are disabled while the option or the Merge Result Pane is off. There is
+no preview dialog: the result pane shows the change, and Undo reverts it.
+
+Classic Auto Merge (Merge Result Pane off) does not run semantic merge.
 
 ## 7. Languages
 
@@ -255,7 +285,7 @@ Every resolution is recorded and shown:
 - **Navigation.** Next/Previous Semantic Resolution in the result pane's
   context menu. They step over whole resolutions; one resolution can cover
   several differences.
-- **Report.** After Auto Merge, and after Copy All into the result, a message
+- **Report.** After Auto Merge, and after Resolve All Conflicts Semantically, a message
   shows "Resolved semantically: N" broken down by rule. Each resolution is
   also logged to the Output pane with its result line and reason.
 - **Status bar.** The result pane's status bar adds "Semantic: N" to the
@@ -286,61 +316,55 @@ Acceptance for a change to any rule:
 - `Replay.ps1 run`: no case moves from match to differs, and every new
   "differs" is read by hand.
 
-Baseline (2026-11-18, after merging master):
+Baseline (2026-11-18, 395 files from 9 repositories):
 
 - `tokens`: 832 conflicts, 165 merged, 129 confirmed by the committed file.
-- SQLProvider subset: semantic match 6, differs 4, 67 conflicts left; the line
-  merge alone leaves 94.
+- `run`, line merge alone: 16 files match the commit, 5 differ, 374 keep
+  conflicts; 781 conflicts left.
+- `run` with `-semantic`: 46 match, 15 differ, 334 keep conflicts; 640
+  conflicts left.
 
-## 10. Current code against this spec
+The manual triples, middle = base: `SemanticDuplicate3Way*` (R1),
+`SemanticMoved3Way*` (R3), `SemanticStringLiteral3Way*`,
+`SemanticParameter3Way*`, `SemanticIdentifier3Way*` (R5),
+`SemanticCommented3Way*` (R6), and two that no rule may touch:
+`SemanticAddition3Way*` (two different additions at one place: stays a
+conflict) and `SemanticSameName3Way*` (the same method added to two different
+classes: R1 must keep both).
 
-Work items, in the order they should be done.
+## 10. Status
 
-1. **Visibility (section 8).** Done 2026-11-18: the `Semantic` state, rule,
-   reason and resolution id on `MergeResultSegment`; marking through
-   `BeginSemanticResolution`/`EndSemanticResolution` in every rule; margin,
-   colours, tooltip, status bar, report, Output pane log and navigation; one
-   undo step per Auto Merge. The new UI strings are not yet in
-   `Translations/WinMerge/English.pot`, like the branch's other strings.
-2. **One pipeline (section 5).**
-   - The interactive command and Copy All run only the analyzer (R4–R6 plus
-     the removed suggestions), never R1–R3.
-   - Classic Auto Merge, without the result pane, runs only the analyzer.
-   - Make `DoSemanticMergeConflictsToResult` the single implementation, with
-     a per-conflict variant for the command.
-3. **Explicit roles (G1).**
-   - `Analyzer::FinalizeStandardSuggestion` picks the unchanged pane by
-     majority vote.
-   - `TryBuildInsertionSuggestion` and `TryCollectIndependentAdditionSuggestions`
-     assume the base is pane 1.
-   - Pass base, mine and theirs into the analyzer.
-4. **Syntax check everywhere (G4).** Only R2 and R3 call `CountSyntaxErrors`.
-   Apply the check to R4–R6 in `ApplySemanticSuggestionToResult`.
-5. **Result pane only (section 3).** Remove:
-   - the direct pane edits (`ReplaceDefinitionText`, `InsertDefinitionText`);
-   - the preview dialog (`SemanticPreviewDlg`, `IDD_SEMANTIC_PREVIEW_DLG`);
-   - the To Left/Middle/Right commands;
-   - the insertion, independent-addition and adopt-agreed suggestions.
-6. **One switch (section 4).**
-   - Merge `OPT_SEMANTIC_MERGE_EXPERIMENTAL` and
-     `OPT_AUTO_MERGE_SEMANTIC_FALLBACK` into one option.
-   - `IsTreeSitterEnabled` requires `OPT_SYNTAX_HIGHLIGHT_MODE != 0`, and
-     parsers are owned by the views: semantic merge needs its own parsers when
-     highlighting is off.
-   - Move the option from the Editor page to the Merge Result page.
-7. **Command line (section 6).**
-   - Replace `-sml`/`-smm`/`-smr` with `-semantic`.
-   - Stop forcing `OPT_SYNTAX_HIGHLIGHT_MODE` to 2.
-8. **Shortcut.** The menu shows `Ctrl+Alt+Shift+A` for "All to Current Pane",
-   but the accelerator table has no entry for it.
-9. **Tests.**
-   - R1 and R3 live in `CMergeDoc` and are tested only by replay. Move their
-     decisions into the MFC-free layer and unit-test them.
-   - Commit the untracked triples (`SemanticDuplicate3Way*`,
-     `SemanticMoved3Way*`, `SemanticSameName3Way*`) and `Replay.ps1`.
-10. **Manual.** Document the option and `-semantic` in the `winmerge-manual`
-    repository. The earlier text for the removed flags is in
-    `SemanticMerge-manual-Command_line.patch`.
+Done on 2026-11-18, the ten work items of the first version of this spec:
+
+1. Visibility (section 8).
+2. One pipeline for every entry point. Classic Auto Merge (no Merge Result
+   Pane) no longer runs semantic merge.
+3. Explicit roles in the analyzer (`SemanticMerge::MergeRoles`).
+4. G4 in every rule (`IsSemanticResultSyntaxOk` for R1 and R3–R6; R2 checks
+   its own lines).
+5. Result pane only. Removed: the direct pane edits, the preview dialog, the
+   To Left/Middle/Right commands, and the insertion, independent-addition and
+   adopt-agreed suggestions.
+6. One option, `OPT_SEMANTIC_MERGE`, independent of syntax highlighting.
+7. `-semantic` replaces `-sml`/`-smm`/`-smr`.
+8. `Ctrl+Alt+Shift+A` is bound to Resolve All Conflicts Semantically.
+9. R1 and R3 decisions are MFC-free and unit-tested; the manual triples use
+   the middle = base layout.
+10. Manual text for the option, `/semantic`, the rules and the shortcuts, in
+    `Docs/Manual` (the `winmerge-manual` submodule).
+
+Found on the way: R5's string literal check compared only the literals, so a
+side with other code changes plus one changed literal passed, and the other
+changes were lost. The check now requires that undoing the literal change
+gives the base text back.
+
+Open:
+
+- The new UI strings are not in `Translations/WinMerge/English.pot`, like the
+  branch's other strings.
+- The margin tooltip and Next/Previous Semantic Resolution are not checked in
+  a running app: MFC shows tooltips only in the active window.
+- The `Docs/Manual` changes need a pull request to `winmerge-manual`.
 
 Not part of this feature. These are on the branch and go to separate pull
 requests:

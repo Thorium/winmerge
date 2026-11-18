@@ -122,132 +122,6 @@ void BuildSemanticMergeInputs(CMergeDoc& doc, SemanticMergeInputs& inputs)
 	}
 }
 
-bool CheckSemanticMergePreconditions(const CMergeDoc& doc, int dstPane, String& message)
-{
-	if (!doc.IsSemanticMergeEnabled())
-	{
-		message = _("Experimental semantic merge suggestions are disabled.");
-		return false;
-	}
-
-	if (doc.m_nBuffers != 3)
-	{
-		message = _("Semantic merge suggestions currently support only 3-way text comparisons.");
-		return false;
-	}
-
-	// During a merge session the compared panes are read-only and the
-	// copy goes to the merge result instead
-	if (dstPane < 0 || dstPane >= doc.m_nBuffers ||
-		(doc.GetReadOnly(dstPane) && !doc.IsSemanticMergeToResult(dstPane)))
-	{
-		message = _("The destination pane is read-only.");
-		return false;
-	}
-
-	return true;
-}
-
-SemanticMerge::DiffInfo MakeSemanticDiffInfo(const DIFFRANGE& dr, int anchorPane, int anchorLine, bool allowAdoptAgreed = false)
-{
-	SemanticMerge::DiffInfo diff;
-	diff.dbegin = dr.dbegin;
-	diff.dend = dr.dend;
-	diff.op = dr.op;
-	diff.anchorPane = anchorPane;
-	diff.anchorLine = anchorLine;
-	diff.allowAdoptAgreed = allowAdoptAgreed;
-	return diff;
-}
-
-bool TryBuildSemanticSuggestion(CMergeDoc& doc, int dstPane, int nDiff, SemanticMerge::Suggestion& suggestion, String& message,
-	int anchorPane = -1, int anchorLine = -1, bool allowAdoptAgreed = false)
-{
-	message.clear();
-	if (!CheckSemanticMergePreconditions(doc, dstPane, message))
-		return false;
-
-	if (nDiff < 0 || nDiff >= doc.m_diffList.GetSize())
-	{
-		message = _("Select a valid difference first.");
-		return false;
-	}
-
-	const DIFFRANGE* pDiff = doc.m_diffList.DiffRangeAt(nDiff);
-	if (pDiff == nullptr)
-	{
-		message = _("The selected difference is not available.");
-		return false;
-	}
-
-	SemanticMergeInputs inputs;
-	BuildSemanticMergeInputs(doc, inputs);
-	SemanticMerge::Analyzer analyzer(inputs.panes, doc.m_nBuffers, inputs.traits);
-	return analyzer.TryBuildSuggestion(dstPane, MakeSemanticDiffInfo(*pDiff, anchorPane, anchorLine, allowAdoptAgreed), suggestion, message);
-}
-
-bool TryCollectSemanticSuggestions(CMergeDoc& doc, int dstPane, std::vector<SemanticMerge::Suggestion>& suggestions, String& message)
-{
-	suggestions.clear();
-	message.clear();
-	if (!CheckSemanticMergePreconditions(doc, dstPane, message))
-		return false;
-
-	std::vector<SemanticMerge::DiffInfo> diffs;
-	for (int nDiff = 0; nDiff < doc.m_diffList.GetSize(); ++nDiff)
-	{
-		if (!doc.m_diffList.IsDiffSignificant(nDiff))
-			continue;
-		const DIFFRANGE* pDiff = doc.m_diffList.DiffRangeAt(nDiff);
-		if (pDiff != nullptr)
-			diffs.push_back(MakeSemanticDiffInfo(*pDiff, -1, -1));
-	}
-
-	SemanticMergeInputs inputs;
-	BuildSemanticMergeInputs(doc, inputs);
-	SemanticMerge::Analyzer analyzer(inputs.panes, doc.m_nBuffers, inputs.traits);
-	return analyzer.TryCollectSuggestions(dstPane, diffs, suggestions, message);
-}
-
-bool ReplaceDefinitionText(CMergeDoc& doc, int dstPane, const SemanticMerge::TagRange& dstTag, const String& replacement)
-{
-	CDiffTextBuffer& dbuf = *doc.m_ptBuf[dstPane];
-	CCrystalTextView* pSource = doc.GetActiveMergeGroupView(dstPane);
-	if (!pSource)
-		return false;
-
-	if (dstTag.startLine < 0 || dstTag.endLine < dstTag.startLine || dstTag.endLine >= dbuf.GetLineCount())
-		return false;
-	if (dstTag.startChar < 0 || dstTag.startChar > dbuf.GetLineLength(dstTag.startLine) ||
-		dstTag.endChar < 0 || dstTag.endChar > dbuf.GetLineLength(dstTag.endLine))
-		return false;
-
-	dbuf.DeleteText(pSource, dstTag.startLine, dstTag.startChar, dstTag.endLine, dstTag.endChar, CE_ACTION_MERGE);
-
-	if (replacement.empty())
-		return true;
-
-	int endLine = 0;
-	int endChar = 0;
-	return dbuf.InsertText(pSource, dstTag.startLine, dstTag.startChar, replacement.c_str(), replacement.length(), endLine, endChar, CE_ACTION_MERGE);
-}
-
-bool InsertDefinitionText(CMergeDoc& doc, int dstPane, int line, int ch, const String& replacement)
-{
-	CDiffTextBuffer& dbuf = *doc.m_ptBuf[dstPane];
-	CCrystalTextView* pSource = doc.GetActiveMergeGroupView(dstPane);
-	if (!pSource)
-		return false;
-	if (line < 0 || line >= dbuf.GetLineCount())
-		return false;
-	if (ch < 0 || ch > dbuf.GetLineLength(line))
-		return false;
-
-	int endLine = 0;
-	int endChar = 0;
-	return dbuf.InsertText(pSource, line, ch, replacement.c_str(), replacement.length(), endLine, endChar, CE_ACTION_MERGE);
-}
-
 }
 
 bool CMergeDoc::IsTreeSitterEnabled() const
@@ -257,152 +131,104 @@ bool CMergeDoc::IsTreeSitterEnabled() const
 
 CTreeSitterParser* CMergeDoc::GetTreeSitterParser(int nBuffer)
 {
-	// The rewritten architecture owns the parser at the view level (created
-	// lazily from the view's resolved language and bound to the pane buffer),
-	// so route through the view instead of a per-document parser member.
+	// The parser is owned by the view: the highlighting parser when that is
+	// tree-sitter, otherwise one the view creates for the file type, so the
+	// semantic features do not depend on the highlighting options
 	CMergeEditView* pView = GetView(0, nBuffer);
 	return pView ? pView->GetTreeSitterParser() : nullptr;
 }
 
+/**
+ * @brief Is semantic conflict resolution on for this comparison?
+ * (Docs/Developers/SemanticMerge.md, section 4)
+ */
 bool CMergeDoc::IsSemanticMergeEnabled() const
 {
-	return GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE_EXPERIMENTAL) && IsTreeSitterEnabled();
-}
-
-namespace
-{
-
-String SemanticPaneLabel(int pane)
-{
-	switch (pane)
-	{
-	case 0: return _("Left");
-	case 1: return _("Middle");
-	default: return _("Right");
-	}
-}
-
-String SemanticPaneLines(const SemanticMerge::Suggestion& suggestion, int pane)
-{
-	const SemanticMerge::TagRange& tag = suggestion.defs[pane].tag;
-	return strutils::format_string3(_("%1 (lines %2-%3)"), SemanticPaneLabel(pane),
-		strutils::to_str(tag.startLine + 1), strutils::to_str(tag.endLine + 1));
-}
-
-/** @brief One-paragraph correspondence summary shown above the code preview. */
-String FormatSemanticSuggestionHeader(const SemanticMerge::Suggestion& suggestion, int dstPane)
-{
-	String header = strutils::format_string1(_("Definition: %1"), suggestion.displayName);
-	header += _T("\n");
-
-	const int srcPane = suggestion.srcPane >= 0 ? suggestion.srcPane : suggestion.changedPane;
-	if (suggestion.insertOnly)
-	{
-		header += strutils::format_string3(
-			_("The new definition from %1 will be inserted into %2 at line %3."),
-			srcPane >= 0 ? SemanticPaneLines(suggestion, srcPane) : SemanticPaneLabel(srcPane),
-			SemanticPaneLabel(dstPane),
-			strutils::to_str(suggestion.insertLine + 1));
-	}
-	else if (srcPane >= 0 && srcPane == suggestion.unchangedPane)
-	{
-		header += strutils::format_string2(
-			_("The two other panes agree on this definition; their version from %1 will replace the changed one in %2."),
-			SemanticPaneLines(suggestion, srcPane),
-			SemanticPaneLines(suggestion, dstPane));
-	}
-	else
-	{
-		header += strutils::format_string2(
-			_("The changed definition from %1 will replace the current definition in %2."),
-			srcPane >= 0 ? SemanticPaneLines(suggestion, srcPane) : SemanticPaneLabel(srcPane),
-			SemanticPaneLines(suggestion, dstPane));
-		if (suggestion.unchangedPane >= 0 && suggestion.unchangedPane != dstPane)
-		{
-			header += _T("\n");
-			header += strutils::format_string1(_("%1 holds the unchanged version of the definition."),
-				SemanticPaneLines(suggestion, suggestion.unchangedPane));
-		}
-	}
-	return header;
-}
-
-}
-
-bool CMergeDoc::PreviewSemanticMergeSuggestion(int dstPane, int nDiff, String& previewHeader, String& previewCode, String& message,
-	int anchorPane /*= -1*/, int anchorLine /*= -1*/, bool allowAdoptAgreed /*= false*/)
-{
-	previewHeader.clear();
-	previewCode.clear();
-	SemanticMerge::Suggestion suggestion;
-	if (!TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message, anchorPane, anchorLine, allowAdoptAgreed))
-		return false;
-
-	previewHeader = FormatSemanticSuggestionHeader(suggestion, dstPane);
-	previewCode = suggestion.previewText;
-	return true;
-}
-
-String CMergeDoc::GetSemanticPreviewFileExt(int pane) const
-{
-	return GetFileExt(m_ptBuf[pane]->GetTempFileName().c_str(), m_strDesc[pane].c_str());
-}
-
-bool CMergeDoc::DoSemanticMergeSuggestion(int dstPane, int nDiff, String& message,
-	int anchorPane /*= -1*/, int anchorLine /*= -1*/, bool allowAdoptAgreed /*= false*/)
-{
-	if (IsSemanticMergeToResult(dstPane))
-	{
-		// Adopting the version the other panes agree on is only a merge
-		// when the destination is the base they both changed
-		SemanticMerge::Suggestion suggestion;
-		if (!TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message, anchorPane, anchorLine,
-			allowAdoptAgreed && dstPane == m_nMergeBasePane))
-			return false;
-		bool bGroupWithPrevious = false;
-		if (!ApplySemanticSuggestionToResult(dstPane, suggestion, true, bGroupWithPrevious, message))
-			return false;
-		message = strutils::format_string1(
-			_("Applied safe semantic copy for definition '%1' to the merge result."),
-			suggestion.displayName);
-		return true;
-	}
-
-	SemanticMerge::Suggestion suggestion;
-	if (!TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message, anchorPane, anchorLine, allowAdoptAgreed))
-		return false;
-
-	const bool bOldEnableRescan = m_bEnableRescan;
-	m_bEnableRescan = false;
-	SetEditedAfterRescan(dstPane);
-	const bool applied = suggestion.insertOnly ?
-		InsertDefinitionText(*this, dstPane, suggestion.insertLine, suggestion.insertChar, suggestion.replacementText) :
-		ReplaceDefinitionText(*this, dstPane, suggestion.defs[dstPane].tag, suggestion.replacementText);
-	if (!applied)
-	{
-		m_bEnableRescan = bOldEnableRescan;
-		message = _("Failed to apply the semantic merge suggestion.");
-		return false;
-	}
-
-	m_bEnableRescan = bOldEnableRescan;
-	FlushAndRescan();
-	UpdateHeaderPath(dstPane);
-	message = strutils::format_string1(
-		_("Applied semantic merge suggestion for definition '%1'."),
-		suggestion.displayName);
-	return true;
+	return m_nBuffers == 3 && GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE) &&
+		GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED);
 }
 
 /**
- * @brief Try safe semantic copy on every conflict that is still
- * unresolved in the merge result.
- * @return Number of conflicts resolved.
+ * @brief Why semantic conflict resolution cannot run, empty when it can.
+ */
+String CMergeDoc::GetSemanticMergeUnavailableReason()
+{
+	if (m_nBuffers != 3)
+		return _("Semantic merge needs three compared files.");
+	if (!GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED))
+		return _("Semantic merge works in the Merge Result pane, which is turned off.");
+	if (!GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE))
+		return _("Semantic merge is turned off (Merge > Resolve Conflicts Semantically).");
+	for (int nPane = 0; nPane < m_nBuffers; ++nPane)
+	{
+		CTreeSitterParser* pParser = GetTreeSitterParser(nPane);
+		if (pParser == nullptr || !pParser->HasLanguage())
+			return _("There is no tree-sitter grammar for this file type.");
+	}
+	return String();
+}
+
+/**
+ * @brief Rules R4-R6: a definition-level resolution of a conflict.
+ */
+bool CMergeDoc::TryBuildSemanticSuggestion(int nDiff, SemanticMerge::Suggestion& suggestion, String& message,
+	int anchorPane, int anchorLine)
+{
+	message.clear();
+	const DIFFRANGE* pDiff = (nDiff >= 0 && nDiff < m_diffList.GetSize()) ? m_diffList.DiffRangeAt(nDiff) : nullptr;
+	if (pDiff == nullptr)
+	{
+		message = _("The difference is not available.");
+		return false;
+	}
+	SemanticMergeInputs inputs;
+	BuildSemanticMergeInputs(*this, inputs);
+	SemanticMerge::Analyzer analyzer(inputs.panes, m_nBuffers, inputs.traits, GetSemanticMergeRoles());
+	SemanticMerge::DiffInfo diff;
+	diff.dbegin = pDiff->dbegin;
+	diff.dend = pDiff->dend;
+	diff.op = pDiff->op;
+	diff.anchorPane = anchorPane;
+	diff.anchorLine = anchorLine;
+	return analyzer.TryBuildSuggestion(diff, suggestion, message);
+}
+
+/**
+ * @brief R1 within the conflict, then R2-R6, in this order, on one pending conflict of the merge result.
+ * @param [out] pWhy When no rule applies: why each one declined.
+ */
+bool CMergeDoc::TryResolveConflictSemantically(int nDiff, bool& bGroupWithPrevious, String* pWhy,
+	int anchorPane, int anchorLine)
+{
+	String tokenWhy, movedWhy, definitionWhy;
+	if (TryContainedAdditionToResult(nDiff, bGroupWithPrevious))
+		return true;
+	if (TryTokenMergeConflictToResult(nDiff, bGroupWithPrevious, tokenWhy))
+		return true;
+	if (TryMovedDefinitionMergeToResult(nDiff, bGroupWithPrevious, movedWhy))
+		return true;
+	SemanticMerge::Suggestion suggestion;
+	if (TryBuildSemanticSuggestion(nDiff, suggestion, definitionWhy, anchorPane, anchorLine) &&
+		ApplySemanticSuggestionToResult(suggestion, bGroupWithPrevious, definitionWhy))
+		return true;
+	if (pWhy != nullptr)
+	{
+		*pWhy = _("No semantic merge rule resolves this conflict.") + _T("\n\n") +
+			SemanticRuleName(SemanticRule::TokenMerge) + _T(": ") + tokenWhy + _T("\n") +
+			SemanticRuleName(SemanticRule::MovedDefinition) + _T(": ") + movedWhy + _T("\n") +
+			_("Definition rules") + _T(": ") + definitionWhy;
+	}
+	return false;
+}
+
+/**
+ * @brief The semantic pipeline over the whole merge result: R1 once, then
+ * R2-R6 on every conflict still pending.
+ * @return Number of resolutions.
  */
 int CMergeDoc::DoSemanticMergeConflictsToResult()
 {
-	const int dstPane = GetMergeDestPane();
-	if (!IsSemanticMergeToResult(dstPane) || !IsSemanticMergeEnabled())
+	if (!m_bResultBuilt || !IsSemanticMergeEnabled())
 		return 0;
 
 	int nApplied = 0;
@@ -415,153 +241,35 @@ int CMergeDoc::DoSemanticMergeConflictsToResult()
 		if (pdi == nullptr || pdi->op != OP_DIFF || !m_diffList.IsDiffSignificant(nDiff) ||
 			!IsResultDiffPending(nDiff))
 			continue;
-		SemanticMerge::Suggestion suggestion;
-		String message;
-		// the local merge of the conflict's own lines first; a suggestion
-		// for the whole definition only where that does not work
-		if (TryTokenMergeConflictToResult(nDiff, bGroupWithPrevious))
-			++nApplied;
-		else if (TryMovedDefinitionMergeToResult(nDiff, bGroupWithPrevious))
-			++nApplied;
-		else if (TryBuildSemanticSuggestion(*this, dstPane, nDiff, suggestion, message) &&
-			ApplySemanticSuggestionToResult(dstPane, suggestion, false, bGroupWithPrevious, message))
+		if (TryResolveConflictSemantically(nDiff, bGroupWithPrevious, nullptr))
 			++nApplied;
 	}
 	return nApplied;
 }
 
-bool CMergeDoc::FindFirstSemanticMergeSuggestion(int dstPane, int& nDiff, String& message,
-	int anchorPane /*= -1*/, int anchorLine /*= -1*/, bool allowAdoptAgreed /*= false*/) const
+/**
+ * @brief The semantic pipeline on one conflict of the merge result (R2-R6).
+ * @param [out] message The resolution's reason, or why no rule applies.
+ */
+bool CMergeDoc::ResolveConflictSemantically(int nDiff, String& message, int anchorPane, int anchorLine)
 {
-	nDiff = -1;
 	message.clear();
-	String lastMessage;
-
-	std::vector<int> candidates;
-	for (int candidateDiff = 0; candidateDiff < m_diffList.GetSize(); ++candidateDiff)
+	if (!m_bResultBuilt || !IsSemanticMergeEnabled())
 	{
-		if (m_diffList.IsDiffSignificant(candidateDiff))
-			candidates.push_back(candidateDiff);
-	}
-
-	// Try the differences nearest the cursor first, so repeated invocations
-	// follow the user around the file instead of re-suggesting the first
-	// candidate in document order every time.
-	if (anchorLine >= 0)
-	{
-		auto distance = [this, anchorLine](int candidateDiff) -> int
-		{
-			const DIFFRANGE* pDiff = m_diffList.DiffRangeAt(candidateDiff);
-			if (pDiff == nullptr)
-				return INT_MAX;
-			if (anchorLine >= pDiff->dbegin && anchorLine <= pDiff->dend)
-				return 0;
-			return (std::min)(std::abs(anchorLine - pDiff->dbegin), std::abs(anchorLine - pDiff->dend));
-		};
-		std::stable_sort(candidates.begin(), candidates.end(),
-			[&distance](int a, int b) { return distance(a) < distance(b); });
-	}
-
-	for (int candidateDiff : candidates)
-	{
-		SemanticMerge::Suggestion suggestion;
-		String candidateMessage;
-		if (TryBuildSemanticSuggestion(*const_cast<CMergeDoc*>(this), dstPane, candidateDiff, suggestion, candidateMessage,
-			anchorPane, anchorLine, allowAdoptAgreed))
-		{
-			nDiff = candidateDiff;
-			message = strutils::format_string1(
-				anchorLine >= 0 ?
-					_("No difference was selected, so WinMerge chose the safe semantic candidate nearest the cursor (difference %1).") :
-					_("No explicit diff was selected, so WinMerge chose the first safe semantic candidate in difference %1."),
-				strutils::to_str(m_diffList.GetSignificantIndex(candidateDiff) + 1));
-			return true;
-		}
-
-		if (lastMessage.empty() && !candidateMessage.empty())
-			lastMessage = candidateMessage;
-	}
-
-	message = !lastMessage.empty() ? lastMessage : _("No safe semantic copy suggestion is available for the destination pane.");
-	return false;
-}
-
-bool CMergeDoc::PreviewAllSemanticMergeSuggestions(int dstPane, String& previewHeader, String& previewCode, String& message)
-{
-	previewHeader.clear();
-	previewCode.clear();
-	std::vector<SemanticMerge::Suggestion> suggestions;
-	if (!TryCollectSemanticSuggestions(*this, dstPane, suggestions, message))
+		message = GetSemanticMergeUnavailableReason();
 		return false;
-
-	previewHeader = strutils::format_string2(
-		_("Safe semantic copy found %1 definition updates for %2."),
-		strutils::to_str(suggestions.size()), SemanticPaneLabel(dstPane));
-	for (size_t i = 0; i < suggestions.size(); ++i)
-	{
-		previewCode += _T("// ==== ");
-		previewCode += suggestions[i].displayName;
-		previewCode += _T(" ====\n");
-		previewCode += suggestions[i].previewText;
-		if (i + 1 < suggestions.size())
-			previewCode += _T("\n\n");
 	}
-	return true;
-}
-
-bool CMergeDoc::DoAllSemanticMergeSuggestions(int dstPane, String& message)
-{
-	std::vector<SemanticMerge::Suggestion> suggestions;
-	if (!TryCollectSemanticSuggestions(*this, dstPane, suggestions, message))
+	const DIFFRANGE* pdi = (nDiff >= 0 && nDiff < m_diffList.GetSize()) ? m_diffList.DiffRangeAt(nDiff) : nullptr;
+	if (pdi == nullptr || pdi->op != OP_DIFF || !IsResultDiffPending(nDiff))
+	{
+		message = _("Place the cursor in an unresolved conflict first.");
 		return false;
-
-	if (IsSemanticMergeToResult(dstPane))
-	{
-		int nApplied = 0;
-		bool bGroupWithPrevious = false;
-		String reason;
-		for (const auto& suggestion : suggestions)
-		{
-			String suggestionMessage;
-			if (ApplySemanticSuggestionToResult(dstPane, suggestion, false, bGroupWithPrevious, suggestionMessage))
-				++nApplied;
-			else if (reason.empty())
-				reason = suggestionMessage;
-		}
-		if (nApplied == 0)
-		{
-			message = !reason.empty() ? reason :
-				_("No safe semantic copy suggestion is available for the merge result.");
-			return false;
-		}
-		message = strutils::format_string1(
-			_("Applied %1 safe semantic copy suggestions to the merge result."),
-			strutils::to_str(nApplied));
-		return true;
 	}
-
-	const bool bOldEnableRescan = m_bEnableRescan;
-	m_bEnableRescan = false;
-	SetEditedAfterRescan(dstPane);
-	for (const auto& suggestion : suggestions)
-	{
-		const bool applied = suggestion.insertOnly ?
-			InsertDefinitionText(*this, dstPane, suggestion.insertLine, suggestion.insertChar, suggestion.replacementText) :
-			ReplaceDefinitionText(*this, dstPane, suggestion.defs[dstPane].tag, suggestion.replacementText);
-		if (!applied)
-		{
-			m_bEnableRescan = bOldEnableRescan;
-			message = _("Failed to apply one of the whole-file semantic merge suggestions.");
-			return false;
-		}
-	}
-
-	m_bEnableRescan = bOldEnableRescan;
-	FlushAndRescan();
-	UpdateHeaderPath(dstPane);
-	message = strutils::format_string1(
-		_("Applied %1 safe semantic copy suggestions to the destination pane."),
-		strutils::to_str(suggestions.size()));
+	bool bGroupWithPrevious = false;
+	if (!TryResolveConflictSemantically(nDiff, bGroupWithPrevious, &message, anchorPane, anchorLine))
+		return false;
+	if (const MergeResultSegment* pSegment = GetResultSegmentByDiff(nDiff))
+		message = pSegment->semanticReason;
 	return true;
 }
 

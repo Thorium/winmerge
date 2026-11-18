@@ -31,7 +31,7 @@
 class CLineFilterHelperMenu;
 class CMainFrame;
 class CMergeResultTextBuffer;
-namespace SemanticMerge { struct Suggestion; }
+namespace SemanticMerge { struct Suggestion; struct MergeRoles; }
 typedef CTypedPtrList<CPtrList, CMergeDoc*> MergeDocList;
 
 /**
@@ -184,15 +184,8 @@ public:
 	void CopyMultiplePartialList(int srcPane, int dstPane, int activePane,
 		int firstDiff, int lastDiff, const CEPoint& ptStart, const CEPoint& ptEnd, bool bCharacter);
 	void DoAutoMerge(int dstPane);
-	bool PreviewSemanticMergeSuggestion(int dstPane, int nDiff, String& previewHeader, String& previewCode, String& message,
-		int anchorPane = -1, int anchorLine = -1, bool allowAdoptAgreed = false);
-	bool DoSemanticMergeSuggestion(int dstPane, int nDiff, String& message,
-		int anchorPane = -1, int anchorLine = -1, bool allowAdoptAgreed = false);
-	bool PreviewAllSemanticMergeSuggestions(int dstPane, String& previewHeader, String& previewCode, String& message);
-	String GetSemanticPreviewFileExt(int pane) const;
-	bool DoAllSemanticMergeSuggestions(int dstPane, String& message);
-	bool FindFirstSemanticMergeSuggestion(int dstPane, int& nDiff, String& message,
-		int anchorPane = -1, int anchorLine = -1, bool allowAdoptAgreed = false) const;
+	/** @brief The semantic pipeline (R2-R6) on one conflict of the merge result */
+	bool ResolveConflictSemantically(int nDiff, String& message, int anchorPane = -1, int anchorLine = -1);
 	bool SanityCheckDiff(const DIFFRANGE& dr) const;
 	bool HasInvisibleLines(int firstDiff, int lastDiff) const;
 	bool InlineDiffListCopy(int srcPane, int dstPane, int nDiff, int nFirstWordDiff, int nLastWordDiff, const std::vector<int>* pWordDiffIndice, bool bGroupWithPrevious = false, bool bUpdateView = true);
@@ -222,6 +215,7 @@ public:
 	CTreeSitterParser* GetTreeSitterParser(int nBuffer);
 	bool IsTreeSitterEnabled() const;
 	bool IsSemanticMergeEnabled() const;
+	String GetSemanticMergeUnavailableReason();
 	void AddMergeViews(CMergeEditSplitterView* pMergeEditSplitterView, CMergeEditView* pView[3]);
 	void RemoveMergeViews(CMergeEditSplitterView* pMergeEditSplitterView);
 	void SetLocationView(CLocationView* pLocationView) { m_pLocationView = pLocationView; }
@@ -356,9 +350,7 @@ public:
 	bool IsMergeResultPaneVisible() const;
 	int GetMergeBasePane() const { return m_nMergeBasePane; }
 	int GetMergeDestPane() const;
-	/** @brief Does a safe semantic copy into dstPane go to the merge result? */
-	bool IsSemanticMergeToResult(int dstPane) const;
-	/** @brief Try safe semantic copy on the unresolved conflicts of the merge result */
+	/** @brief The semantic pipeline (R1, then R2-R6 per conflict) over the merge result */
 	int DoSemanticMergeConflictsToResult();
 	bool StartMergeSession(int nBasePane, bool bAutoMerge, bool bWithMessage);
 	bool EndMergeSession();
@@ -427,13 +419,21 @@ private:
 	int RewritePaneLinesInResult(int nPane, int nBeginLine, int nEndLine, const std::vector<String>& newLines,
 		const std::vector<int>& diffs, bool& bGroupWithPrevious);
 	bool ResultResolveWithText(int nDiff, const String& resolvedText, bool bGroupWithPrevious);
-	bool TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPrevious);
-	bool TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevious);
+	bool TryContainedAdditionToResult(int nDiff, bool& bGroupWithPrevious);
+	bool TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPrevious, String& why);
+	bool TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevious, String& why);
 	int ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious);
 	bool GetDefinitionLines(int nPane, int nStartLine, int nEndLine,
 		std::vector<String>& lines, std::vector<int>& apparent) const;
-	bool ApplySemanticSuggestionToResult(int dstPane, const SemanticMerge::Suggestion& suggestion, bool bExplicit,
+	bool TryBuildSemanticSuggestion(int nDiff, SemanticMerge::Suggestion& suggestion, String& message,
+		int anchorPane, int anchorLine);
+	bool TryResolveConflictSemantically(int nDiff, bool& bGroupWithPrevious, String* pWhy,
+		int anchorPane = -1, int anchorLine = -1);
+	bool ApplySemanticSuggestionToResult(const SemanticMerge::Suggestion& suggestion,
 		bool& bGroupWithPrevious, String& message);
+	SemanticMerge::MergeRoles GetSemanticMergeRoles() const;
+	/** @brief G4: does the file with the new text in place parse no worse than both sides' files? */
+	bool IsSemanticResultSyntaxOk(int nPane, int nBeginLine, int nEndLine, const String& newText);
 	SemanticResolutionSnapshot BeginSemanticResolution() const;
 	int EndSemanticResolution(const SemanticResolutionSnapshot& before, SemanticRule rule, const String& reason);
 	SemanticResolutionCounts m_semanticCounts; /**< Semantic resolutions since the last reset */

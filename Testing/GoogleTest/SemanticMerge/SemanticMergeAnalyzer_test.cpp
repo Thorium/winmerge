@@ -142,9 +142,10 @@ public:
 		}
 	}
 
-	SemanticMerge::Analyzer MakeAnalyzer(const tchar_t* language = _T("cpp")) const
+	SemanticMerge::Analyzer MakeAnalyzer(const tchar_t* language = _T("cpp"),
+		const SemanticMerge::MergeRoles& roles = SemanticMerge::MergeRoles()) const
 	{
-		return SemanticMerge::Analyzer(m_panes, 3, SemanticMerge::TraitsForLanguage(language));
+		return SemanticMerge::Analyzer(m_panes, 3, SemanticMerge::TraitsForLanguage(language), roles);
 	}
 
 	SemanticMerge::PaneData m_panes[3];
@@ -218,6 +219,10 @@ TEST(SemanticMergeHelpers, ExtractSingleStringLiteralChangeFindsUniqueChange)
 	// Two changed literals must be rejected.
 	EXPECT_FALSE(SemanticMerge::ExtractSingleStringLiteralChange(
 		_T("f(\"a\", \"b\");"), _T("f(\"x\", \"y\");"), _T("\""), oldLit, newLit));
+
+	// So must a literal change that comes with other code changes.
+	EXPECT_FALSE(SemanticMerge::ExtractSingleStringLiteralChange(
+		_T("return \"old\";"), _T("log(x);\nreturn \"new\";"), _T("\""), oldLit, newLit));
 
 	// Single-quoted literals are found when the language allows them.
 	ASSERT_TRUE(SemanticMerge::ExtractSingleStringLiteralChange(
@@ -339,7 +344,8 @@ TEST(SemanticMergeHelpers, TraitsForLanguageMapping)
 }
 
 // ---------------------------------------------------------------------------
-// Analyzer scenario tests (synthetic panes)
+// Analyzer scenario tests (synthetic panes). Roles default to the WinMerge
+// layout: mine = left (0), base = middle (1), theirs = right (2).
 // ---------------------------------------------------------------------------
 
 std::vector<String> SimpleFunction(const tchar_t* body)
@@ -352,7 +358,16 @@ std::vector<String> SimpleFunction(const tchar_t* body)
 	};
 }
 
-TEST(SemanticMergeAnalyzer, StandardReplaceTakesChangedDefinition)
+SemanticMerge::MergeRoles BaseLeftRoles()
+{
+	SemanticMerge::MergeRoles roles;
+	roles.base = 0;
+	roles.mine = 1;
+	roles.theirs = 2;
+	return roles;
+}
+
+TEST(SemanticMergeAnalyzer, OneSidedChangeTakesChangedDefinition)
 {
 	ThreeWayFixture fx(
 		SimpleFunction(_T("return value + 1;")),
@@ -362,24 +377,55 @@ TEST(SemanticMergeAnalyzer, StandardReplaceTakesChangedDefinition)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(0, MakeDiff(2, 2), suggestion, message)) << ucr::toUTF8(message);
-	EXPECT_EQ(0, suggestion.unchangedPane);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(2, 2), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(SemanticMerge::SuggestionKind::DefinitionChange, suggestion.kind);
+	EXPECT_EQ(1, suggestion.unchangedPane);
 	EXPECT_EQ(2, suggestion.changedPane);
-	EXPECT_FALSE(suggestion.insertOnly);
+	EXPECT_EQ(1, suggestion.anchorPane);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("value + 5")));
+}
 
-	// Applying to the already-changed pane is rejected by default (the CLI
-	// and copy-all paths must not silently overwrite the changed version).
-	EXPECT_FALSE(analyzer.TryBuildSuggestion(2, MakeDiff(2, 2), suggestion, message));
+TEST(SemanticMergeAnalyzer, BaseComesFromTheRolesNotFromAMajority)
+{
+	// Mine and theirs made the same change; the base is the odd one out. A
+	// majority vote would take the base for "unchanged" and copy it back.
+	ThreeWayFixture fx(
+		SimpleFunction(_T("return value + 5;")),
+		SimpleFunction(_T("return value + 1;")),
+		SimpleFunction(_T("return value + 5;")));
+	auto analyzer = fx.MakeAnalyzer();
 
-	// Interactive commands may let the changed pane adopt the definition the
-	// two other panes agree on (catch-up/revert), with a preview.
-	SemanticMerge::DiffInfo adoptDiff = MakeDiff(2, 2);
-	adoptDiff.allowAdoptAgreed = true;
-	SemanticMerge::Suggestion adoption;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, adoptDiff, adoption, message)) << ucr::toUTF8(message);
-	EXPECT_EQ(adoption.unchangedPane, adoption.srcPane);
-	EXPECT_NE(String::npos, adoption.replacementText.find(_T("value + 1")));
+	SemanticMerge::Suggestion suggestion;
+	String message;
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(2, 2), suggestion, message));
+	EXPECT_FALSE(message.empty());
+
+	// With the base on the left, the same panes are a one-sided change by
+	// the middle pane
+	SemanticMerge::MergeRoles roles = BaseLeftRoles();
+	auto analyzerBaseLeft = fx.MakeAnalyzer(_T("cpp"), roles);
+	ASSERT_TRUE(analyzerBaseLeft.TryBuildSuggestion(MakeDiff(2, 2), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(1, suggestion.changedPane);
+	EXPECT_EQ(0, suggestion.anchorPane);
+	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("value + 1")));
+}
+
+TEST(SemanticMergeAnalyzer, InvalidRolesAreRejected)
+{
+	ThreeWayFixture fx(
+		SimpleFunction(_T("return value + 1;")),
+		SimpleFunction(_T("return value + 1;")),
+		SimpleFunction(_T("return value + 5;")));
+	SemanticMerge::MergeRoles roles;
+	roles.base = 1;
+	roles.mine = 1;
+	roles.theirs = 2;
+	auto analyzer = fx.MakeAnalyzer(_T("cpp"), roles);
+
+	SemanticMerge::Suggestion suggestion;
+	String message;
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(2, 2), suggestion, message));
+	EXPECT_FALSE(message.empty());
 }
 
 TEST(SemanticMergeAnalyzer, ShiftedDefinitionsAreReconciledByName)
@@ -417,7 +463,7 @@ TEST(SemanticMergeAnalyzer, ShiftedDefinitionsAreReconciledByName)
 	// panes overlaps Helper instead.
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(1, MakeDiff(5, 8), suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(5, 8), suggestion, message)) << ucr::toUTF8(message);
 	EXPECT_EQ(0, suggestion.changedPane);
 	EXPECT_EQ(0, suggestion.tags[1].startLine);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("base + 9")));
@@ -425,11 +471,10 @@ TEST(SemanticMergeAnalyzer, ShiftedDefinitionsAreReconciledByName)
 
 TEST(SemanticMergeAnalyzer, CandidateLoopSkipsIdenticalDefinition)
 {
-	// Middle reordered the functions and changed BuildMessage. The diff line
-	// lands inside BuildMessage in the middle pane but inside Multiply in the
-	// outer panes. Multiply is identical everywhere, so it cannot produce a
-	// suggestion; the analyzer must move on to BuildMessage instead of
-	// giving up after Multiply fails.
+	// The middle pane reordered the functions and changed BuildMessage; the
+	// base is on the left. The diff line lands inside BuildMessage in the
+	// middle pane but inside Multiply in the outer panes. Multiply is
+	// identical everywhere, so the analyzer must move on to BuildMessage.
 	std::vector<String> outer = {
 		_T("int Multiply(int left, int right)"),
 		_T("{"),
@@ -454,11 +499,11 @@ TEST(SemanticMergeAnalyzer, CandidateLoopSkipsIdenticalDefinition)
 	};
 
 	ThreeWayFixture fx(outer, middle, outer);
-	auto analyzer = fx.MakeAnalyzer();
+	auto analyzer = fx.MakeAnalyzer(_T("cpp"), BaseLeftRoles());
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, MakeDiff(2, 2), suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(2, 2), suggestion, message)) << ucr::toUTF8(message);
 	EXPECT_EQ(1, suggestion.changedPane);
 	EXPECT_EQ(_T("BuildMessage"), suggestion.displayName);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("changed version")));
@@ -466,8 +511,8 @@ TEST(SemanticMergeAnalyzer, CandidateLoopSkipsIdenticalDefinition)
 
 TEST(SemanticMergeAnalyzer, CursorAnchorSelectsDefinitionInsideWideDiff)
 {
-	// Middle changed two reordered functions; a single diff block spans both.
-	// The cursor anchor decides which definition the user means.
+	// The middle pane changed two reordered functions; a single diff block
+	// spans both. The cursor anchor decides which definition the user means.
 	std::vector<String> outer = {
 		_T("int F(int a)"),
 		_T("{"),
@@ -492,7 +537,7 @@ TEST(SemanticMergeAnalyzer, CursorAnchorSelectsDefinitionInsideWideDiff)
 	};
 
 	ThreeWayFixture fx(outer, middle, outer);
-	auto analyzer = fx.MakeAnalyzer();
+	auto analyzer = fx.MakeAnalyzer(_T("cpp"), BaseLeftRoles());
 
 	SemanticMerge::DiffInfo diff = MakeDiff(0, 8);
 	diff.anchorPane = 1;
@@ -500,17 +545,17 @@ TEST(SemanticMergeAnalyzer, CursorAnchorSelectsDefinitionInsideWideDiff)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, diff, suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(diff, suggestion, message)) << ucr::toUTF8(message);
 	EXPECT_EQ(_T("G"), suggestion.displayName);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("return 20")));
 
 	diff.anchorLine = 7; // middle's F body
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, diff, suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(diff, suggestion, message)) << ucr::toUTF8(message);
 	EXPECT_EQ(_T("F"), suggestion.displayName);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("return 10")));
 }
 
-TEST(SemanticMergeAnalyzer, StringLiteralReplayOntoRefactoredPane)
+TEST(SemanticMergeAnalyzer, StringLiteralReplayOntoRefactoredSide)
 {
 	std::vector<String> base = {
 		_T("const char* Msg(int value)"),
@@ -532,27 +577,26 @@ TEST(SemanticMergeAnalyzer, StringLiteralReplayOntoRefactoredPane)
 		_T("}"),
 	};
 
-	ThreeWayFixture fx(base, literalChanged, refactored);
+	ThreeWayFixture fx(literalChanged, base, refactored);
 	auto analyzer = fx.MakeAnalyzer();
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, MakeDiff(2, 4), suggestion, message)) << ucr::toUTF8(message);
-	EXPECT_EQ(0, suggestion.unchangedPane);
-	EXPECT_EQ(1, suggestion.changedPane);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(2, 4), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(SemanticMerge::SuggestionKind::StringLiteral, suggestion.kind);
+	EXPECT_EQ(1, suggestion.unchangedPane);
+	EXPECT_EQ(0, suggestion.changedPane);
+	EXPECT_EQ(2, suggestion.anchorPane);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("\"changed\"")));
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("hasValue")));
 	EXPECT_EQ(String::npos, suggestion.replacementText.find(_T("\"stable\"")));
 
-	// The replay only applies onto the refactored pane.
-	EXPECT_FALSE(analyzer.TryBuildSuggestion(1, MakeDiff(2, 4), suggestion, message));
-
 	// A language without known string syntax disables the replay heuristics.
 	auto gatedAnalyzer = fx.MakeAnalyzer(_T("unknown-lang"));
-	EXPECT_FALSE(gatedAnalyzer.TryBuildSuggestion(2, MakeDiff(2, 4), suggestion, message));
+	EXPECT_FALSE(gatedAnalyzer.TryBuildSuggestion(MakeDiff(2, 4), suggestion, message));
 }
 
-TEST(SemanticMergeAnalyzer, ParameterRenameReplayOntoRefactoredPane)
+TEST(SemanticMergeAnalyzer, ParameterRenameReplayOntoRefactoredSide)
 {
 	std::vector<String> base = {
 		_T("int Calc(int base)"),
@@ -574,18 +618,20 @@ TEST(SemanticMergeAnalyzer, ParameterRenameReplayOntoRefactoredPane)
 		_T("}"),
 	};
 
-	ThreeWayFixture fx(base, renamed, refactored);
+	ThreeWayFixture fx(renamed, base, refactored);
 	auto analyzer = fx.MakeAnalyzer();
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, MakeDiff(0, 3), suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(0, 3), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(SemanticMerge::SuggestionKind::ParameterRename, suggestion.kind);
+	EXPECT_EQ(2, suggestion.anchorPane);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("int Calc(int offset)")));
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("offset + 1")));
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("result")));
 }
 
-TEST(SemanticMergeAnalyzer, IdentifierRenameReplayOntoRefactoredPane)
+TEST(SemanticMergeAnalyzer, IdentifierRenameReplayOntoRefactoredSide)
 {
 	std::vector<String> base = {
 		_T("int Calc(int value)"),
@@ -614,15 +660,15 @@ TEST(SemanticMergeAnalyzer, IdentifierRenameReplayOntoRefactoredPane)
 		_T("}"),
 	};
 
-	ThreeWayFixture fx(base, renamed, refactored);
+	ThreeWayFixture fx(renamed, base, refactored);
 	auto analyzer = fx.MakeAnalyzer();
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
 	// The refactor added a fourth occurrence of "score", so the rename has 3
-	// occurrences on the renamed side but 4 in the destination; the replay
-	// must be rejected as not uniquely mappable.
-	EXPECT_FALSE(analyzer.TryBuildSuggestion(2, MakeDiff(2, 5), suggestion, message));
+	// occurrences on the renamed side but 4 on the refactored side; the
+	// replay must be rejected as not uniquely mappable.
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(2, 5), suggestion, message));
 
 	// With a refactor that keeps the occurrence count, the replay succeeds.
 	std::vector<String> refactoredSameCount = {
@@ -634,107 +680,12 @@ TEST(SemanticMergeAnalyzer, IdentifierRenameReplayOntoRefactoredPane)
 		_T("\treturn score;"),
 		_T("}"),
 	};
-	ThreeWayFixture fx2(base, renamed, refactoredSameCount);
+	ThreeWayFixture fx2(renamed, base, refactoredSameCount);
 	auto analyzer2 = fx2.MakeAnalyzer();
-	ASSERT_TRUE(analyzer2.TryBuildSuggestion(2, MakeDiff(2, 5), suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer2.TryBuildSuggestion(MakeDiff(2, 5), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(SemanticMerge::SuggestionKind::IdentifierRename, suggestion.kind);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("total += bonus")));
 	EXPECT_EQ(String::npos, suggestion.replacementText.find(_T("score")));
-}
-
-TEST(SemanticMergeAnalyzer, OneSidedAdditionInsertsIntoMiddle)
-{
-	std::vector<String> withExtra = {
-		_T("int First(int a)"),
-		_T("{"),
-		_T("\treturn a;"),
-		_T("}"),
-		_T("int Extra(int b)"),
-		_T("{"),
-		_T("\treturn b * 2;"),
-		_T("}"),
-		_T("int Last(int c)"),
-		_T("{"),
-		_T("\treturn c;"),
-		_T("}"),
-	};
-	std::vector<String> without = {
-		_T("int First(int a)"),
-		_T("{"),
-		_T("\treturn a;"),
-		_T("}"),
-		_T("int Last(int c)"),
-		_T("{"),
-		_T("\treturn c;"),
-		_T("}"),
-	};
-
-	ThreeWayFixture fx(withExtra, without, without);
-	auto analyzer = fx.MakeAnalyzer();
-
-	SemanticMerge::Suggestion suggestion;
-	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(1, MakeDiff(4, 7, OP_1STONLY), suggestion, message)) << ucr::toUTF8(message);
-	EXPECT_TRUE(suggestion.insertOnly);
-	EXPECT_EQ(4, suggestion.insertLine); // before Last() in the middle pane
-	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("int Extra(int b)")));
-}
-
-TEST(SemanticMergeAnalyzer, IndependentAdditionsCollectedForMiddlePane)
-{
-	std::vector<String> common = {
-		_T("int First(int a)"),
-		_T("{"),
-		_T("\treturn a;"),
-		_T("}"),
-		_T("int Last(int c)"),
-		_T("{"),
-		_T("\treturn c;"),
-		_T("}"),
-	};
-	std::vector<String> left = {
-		_T("int First(int a)"),
-		_T("{"),
-		_T("\treturn a;"),
-		_T("}"),
-		_T("int LeftOnly(int x)"),
-		_T("{"),
-		_T("\treturn x + 1;"),
-		_T("}"),
-		_T("int Last(int c)"),
-		_T("{"),
-		_T("\treturn c;"),
-		_T("}"),
-	};
-	std::vector<String> right = {
-		_T("int First(int a)"),
-		_T("{"),
-		_T("\treturn a;"),
-		_T("}"),
-		_T("int Last(int c)"),
-		_T("{"),
-		_T("\treturn c;"),
-		_T("}"),
-		_T("int RightOnly(int y)"),
-		_T("{"),
-		_T("\treturn y - 1;"),
-		_T("}"),
-	};
-
-	ThreeWayFixture fx(left, common, right);
-	auto analyzer = fx.MakeAnalyzer();
-
-	std::vector<SemanticMerge::Suggestion> suggestions;
-	String message;
-	ASSERT_TRUE(analyzer.TryCollectSuggestions(1, {}, suggestions, message)) << ucr::toUTF8(message);
-	ASSERT_EQ(2u, suggestions.size());
-	String combined;
-	for (const auto& s : suggestions)
-	{
-		EXPECT_TRUE(s.insertOnly);
-		combined += s.replacementText;
-	}
-	EXPECT_NE(String::npos, combined.find(_T("LeftOnly")));
-	EXPECT_NE(String::npos, combined.find(_T("RightOnly")));
 }
 
 TEST(SemanticMergeAnalyzer, BothSidesChangedSameDefinitionIsRejected)
@@ -747,7 +698,7 @@ TEST(SemanticMergeAnalyzer, BothSidesChangedSameDefinitionIsRejected)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	EXPECT_FALSE(analyzer.TryBuildSuggestion(0, MakeDiff(2, 2), suggestion, message));
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(2, 2), suggestion, message));
 	EXPECT_FALSE(message.empty());
 }
 
@@ -762,7 +713,7 @@ TEST(SemanticMergeAnalyzer, MissingTreeSitterDataIsRejected)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	EXPECT_FALSE(analyzer.TryBuildSuggestion(0, MakeDiff(2, 2), suggestion, message));
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(2, 2), suggestion, message));
 	EXPECT_FALSE(message.empty());
 }
 
@@ -776,7 +727,7 @@ TEST(SemanticMergeAnalyzer, TwoWayComparisonIsRejected)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	EXPECT_FALSE(analyzer.TryBuildSuggestion(0, MakeDiff(0, 1), suggestion, message));
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(0, 1), suggestion, message));
 	EXPECT_FALSE(message.empty());
 }
 
@@ -797,15 +748,39 @@ TEST(SemanticMergeAnalyzer, CommentedOutFunctionReceivesUpdatedContent)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(0, MakeDiff(0, 3), suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(0, 3), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(SemanticMerge::SuggestionKind::CommentedOut, suggestion.kind);
 	EXPECT_EQ(1, suggestion.unchangedPane);
 	EXPECT_EQ(2, suggestion.changedPane);
-	EXPECT_FALSE(suggestion.insertOnly);
+	EXPECT_EQ(0, suggestion.anchorPane);
 	EXPECT_EQ(_T("// int Compute(int value)\n// {\n// \treturn value + 5;\n// }"),
 		suggestion.replacementText);
-	// The destination range covers the commented block.
+	// The anchor range covers the commented block.
 	EXPECT_EQ(0, suggestion.defs[0].tag.startLine);
 	EXPECT_EQ(3, suggestion.defs[0].tag.endLine);
+}
+
+TEST(SemanticMergeAnalyzer, CommentedCopyOfTheEditedVersionIsRejected)
+{
+	// The commented block matches the edited version, not the base: the
+	// commenting side did not comment out the base definition.
+	std::vector<String> commentedOut = {
+		_T("// int Compute(int value)"),
+		_T("// {"),
+		_T("// \treturn value + 5;"),
+		_T("// }"),
+	};
+
+	ThreeWayFixture fx(
+		commentedOut,
+		SimpleFunction(_T("return value + 1;")),
+		SimpleFunction(_T("return value + 5;")));
+	auto analyzer = fx.MakeAnalyzer();
+
+	SemanticMerge::Suggestion suggestion;
+	String message;
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(0, 3), suggestion, message));
+	EXPECT_FALSE(message.empty());
 }
 
 TEST(SemanticMergeAnalyzer, CommentedBlockWithManualNotesIsRejected)
@@ -826,11 +801,11 @@ TEST(SemanticMergeAnalyzer, CommentedBlockWithManualNotesIsRejected)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	EXPECT_FALSE(analyzer.TryBuildSuggestion(0, MakeDiff(0, 4), suggestion, message));
+	EXPECT_FALSE(analyzer.TryBuildSuggestion(MakeDiff(0, 4), suggestion, message));
 	EXPECT_FALSE(message.empty());
 }
 
-TEST(SemanticMergeAnalyzer, CommentedOutFunctionInRightPaneAlsoSupported)
+TEST(SemanticMergeAnalyzer, CommentedOutFunctionOnTheirsSideAlsoSupported)
 {
 	std::vector<String> commentedOut = {
 		_T("# def compute(value)"),
@@ -864,14 +839,15 @@ TEST(SemanticMergeAnalyzer, CommentedOutFunctionInRightPaneAlsoSupported)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, MakeDiff(0, 1), suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(0, 1), suggestion, message)) << ucr::toUTF8(message);
 	EXPECT_EQ(1, suggestion.unchangedPane);
 	EXPECT_EQ(0, suggestion.changedPane);
+	EXPECT_EQ(2, suggestion.anchorPane);
 	EXPECT_EQ(_T("# def compute(value)\n# \treturn value + 5"), suggestion.replacementText);
 }
 
 // ---------------------------------------------------------------------------
-// File-based scenario tests over Testing/Data/SemanticMergeManual
+// File-based scenario tests over Testing/Data/SemanticMergeManual (middle = base)
 // ---------------------------------------------------------------------------
 
 TEST(SemanticMergeManualData, StringLiteralTripleReplaysOntoRight)
@@ -888,10 +864,30 @@ TEST(SemanticMergeManualData, StringLiteralTripleReplaysOntoRight)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(2, MakeDiff(2, 6), suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(2, 6), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(2, suggestion.anchorPane);
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("\"changed version\"")));
 	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("hasValue")));
 	EXPECT_EQ(String::npos, suggestion.replacementText.find(_T("\"stable version\"")));
+}
+
+TEST(SemanticMergeManualData, ParameterTripleReplaysOntoRight)
+{
+	std::vector<String> left, middle, right;
+	ASSERT_TRUE(LoadLines(kDataDir + "SemanticParameter3WayLeft.cpp", left));
+	ASSERT_TRUE(LoadLines(kDataDir + "SemanticParameter3WayMiddle.cpp", middle));
+	ASSERT_TRUE(LoadLines(kDataDir + "SemanticParameter3WayRight.cpp", right));
+
+	ThreeWayFixture fx(left, middle, right);
+	auto analyzer = fx.MakeAnalyzer();
+
+	SemanticMerge::Suggestion suggestion;
+	String message;
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(2, 7), suggestion, message)) << ucr::toUTF8(message);
+	EXPECT_EQ(SemanticMerge::SuggestionKind::ParameterRename, suggestion.kind);
+	EXPECT_EQ(2, suggestion.anchorPane);
+	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("int ComputeScore(int offset)")));
+	EXPECT_NE(String::npos, suggestion.replacementText.find(_T("bonus")));
 }
 
 TEST(SemanticMergeManualData, CommentedTripleUpdatesCommentedCopy)
@@ -909,53 +905,95 @@ TEST(SemanticMergeManualData, CommentedTripleUpdatesCommentedCopy)
 
 	SemanticMerge::Suggestion suggestion;
 	String message;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(0, MakeDiff(7, 10), suggestion, message)) << ucr::toUTF8(message);
+	ASSERT_TRUE(analyzer.TryBuildSuggestion(MakeDiff(7, 10), suggestion, message)) << ucr::toUTF8(message);
 	EXPECT_EQ(1, suggestion.unchangedPane);
 	EXPECT_EQ(2, suggestion.changedPane);
+	EXPECT_EQ(0, suggestion.anchorPane);
 	EXPECT_EQ(_T("// int ComputeScore(int base)\n// {\n// \treturn base + 2;\n// }"),
 		suggestion.replacementText);
 }
 
-TEST(SemanticMergeManualData, CliTripleStandardReplace)
+// ---------------------------------------------------------------------------
+// Definition-level decisions of R1 (duplicate addition) and R3 (moved definition)
+// ---------------------------------------------------------------------------
+
+TEST(SemanticMergeDecisions, SqueezeNonBlankLinesIgnoresLayout)
 {
-	std::vector<String> left, middle, right;
-	ASSERT_TRUE(LoadLines(kDataDir + "SemanticCli3WayLeft.cpp", left));
-	ASSERT_TRUE(LoadLines(kDataDir + "SemanticCli3WayMiddle.cpp", middle));
-	ASSERT_TRUE(LoadLines(kDataDir + "SemanticCli3WayRight.cpp", right));
+	const std::vector<String> a = { _T("int  F( int a )"), _T(""), _T("\t{ return a; }") };
+	const std::vector<String> b = { _T("int F(int a)"), _T("{ return a; }"), _T("   ") };
+	EXPECT_EQ(SemanticMerge::SqueezeNonBlankLines(a), SemanticMerge::SqueezeNonBlankLines(b));
+}
 
-	ThreeWayFixture fx(left, middle, right);
-	auto analyzer = fx.MakeAnalyzer();
+TEST(SemanticMergeDecisions, DuplicateAdditionDropsTheSideWithNothingExtra)
+{
+	const std::vector<String> plain = { _T("int Helper()"), _T("{"), _T("\treturn 1;"), _T("}") };
+	std::vector<String> documented = { _T("/// The helper"), _T("int Helper()"), _T("{"), _T("\treturn 1;"), _T("}") };
 
-	const int lineCount = static_cast<int>(left.size());
-	SemanticMerge::Suggestion suggestion;
-	String message;
-	// Left == Right, Middle changed: destination must be a pane that still
-	// has the unchanged text.
-	const bool ok = analyzer.TryBuildSuggestion(0, MakeDiff(0, lineCount - 1), suggestion, message);
-	ASSERT_TRUE(ok) << ucr::toUTF8(message);
-	EXPECT_EQ(1, suggestion.changedPane);
+	// mine has the doc comment as well: theirs adds nothing, drop theirs
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Theirs, SemanticMerge::ChooseDuplicateAdditionToDrop(documented, plain));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Mine, SemanticMerge::ChooseDuplicateAdditionToDrop(plain, documented));
+	// the same lines, indented differently: either may go
+	const std::vector<String> indented = { _T("int Helper()"), _T("{"), _T("    return 1;"), _T("}") };
+	EXPECT_NE(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseDuplicateAdditionToDrop(plain, indented));
 
-	// The right pane holds the same unchanged text, so it must be accepted
-	// as a destination too (the CLI -smr path).
-	SemanticMerge::Suggestion rightSuggestion;
-	message.clear();
-	const bool okRight = analyzer.TryBuildSuggestion(2, MakeDiff(0, lineCount - 1), rightSuggestion, message);
-	ASSERT_TRUE(okRight) << ucr::toUTF8(message);
-	EXPECT_EQ(1, rightSuggestion.changedPane);
+	// each has something the other lacks: keep both
+	std::vector<String> otherComment = { _T("/// Other words"), _T("int Helper()"), _T("{"), _T("\treturn 1;"), _T("}") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseDuplicateAdditionToDrop(documented, otherComment));
+}
 
-	// The middle pane already has the changed text; asking to copy into it
-	// must be rejected by default...
-	SemanticMerge::Suggestion middleSuggestion;
-	message.clear();
-	EXPECT_FALSE(analyzer.TryBuildSuggestion(1, MakeDiff(0, lineCount - 1), middleSuggestion, message));
+TEST(SemanticMergeDecisions, ContainedAdditionKeepsTheSideThatHasMore)
+{
+	const std::vector<String> helper = { _T("/// The helper"), _T("int Helper()"), _T("{"), _T("\treturn 1;"), _T("}") };
+	std::vector<String> helperAndMore = helper;
+	helperAndMore.push_back(_T(""));
+	helperAndMore.push_back(_T("int More() { return 2; }"));
 
-	// ...but with adoption enabled it reverts the middle pane to the version
-	// the outer panes agree on.
-	SemanticMerge::DiffInfo adoptDiff = MakeDiff(0, lineCount - 1);
-	adoptDiff.allowAdoptAgreed = true;
-	ASSERT_TRUE(analyzer.TryBuildSuggestion(1, adoptDiff, middleSuggestion, message)) << ucr::toUTF8(message);
-	EXPECT_EQ(middleSuggestion.unchangedPane, middleSuggestion.srcPane);
-	EXPECT_NE(String::npos, middleSuggestion.replacementText.find(_T("base + 1")));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Theirs, SemanticMerge::ChooseContainedAdditionToDrop(helperAndMore, helper));
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::Mine, SemanticMerge::ChooseContainedAdditionToDrop(helper, helperAndMore));
+	// the same addition, or two different ones: not this rule
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(helper, helper));
+	const std::vector<String> other = { _T("int Other()"), _T("{"), _T("\treturn 3;"), _T("}") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(helper, other));
+	// the lines must appear in the same order
+	const std::vector<String> reordered = { _T("int Helper()"), _T("/// The helper"), _T("{"), _T("\treturn 1;"), _T("}"), _T("int More() { return 2; }") };
+	EXPECT_EQ(SemanticMerge::DuplicateDrop::None, SemanticMerge::ChooseContainedAdditionToDrop(reordered, helper));
+}
+
+TEST(SemanticMergeDecisions, MovedDefinitionIsTheSideAwayFromTheBasePosition)
+{
+	// base at lines 10-14
+	EXPECT_EQ(SemanticMerge::MovedSide::Mine, SemanticMerge::DetectMovedDefinition(10, 14, 30, 34, 10, 15));
+	EXPECT_EQ(SemanticMerge::MovedSide::Theirs, SemanticMerge::DetectMovedDefinition(10, 14, 11, 14, 2, 6));
+	// both moved, or neither: not this rule
+	EXPECT_EQ(SemanticMerge::MovedSide::None, SemanticMerge::DetectMovedDefinition(10, 14, 30, 34, 2, 6));
+	EXPECT_EQ(SemanticMerge::MovedSide::None, SemanticMerge::DetectMovedDefinition(10, 14, 10, 14, 12, 16));
+}
+
+TEST(SemanticMergeDecisions, MovedDefinitionCarriesTheEdit)
+{
+	const auto traits = SemanticMerge::TraitsForLanguage(_T("cpp"));
+	const std::vector<String> base = { _T("int F(int a)"), _T("{"), _T("\treturn a + 1;"), _T("}") };
+	const std::vector<String> edited = { _T("int F(int a)"), _T("{"), _T("\treturn a + 2;"), _T("}") };
+	std::vector<String> merged;
+
+	// the mover only moved it: the editor's version
+	ASSERT_TRUE(SemanticMerge::MergeMovedDefinition(base, base, edited, traits, merged));
+	EXPECT_EQ(edited, merged);
+
+	// the mover also renamed it: both changes, token by token
+	const std::vector<String> renamed = { _T("int G(int a)"), _T("{"), _T("\treturn a + 1;"), _T("}") };
+	ASSERT_TRUE(SemanticMerge::MergeMovedDefinition(base, renamed, edited, traits, merged));
+	const std::vector<String> expected = { _T("int G(int a)"), _T("{"), _T("\treturn a + 2;"), _T("}") };
+	EXPECT_EQ(expected, merged);
+
+	// the editor only re-indented: a pure move, which the line merge handles
+	const std::vector<String> reindented = { _T("int F(int a)"), _T("{"), _T("    return a + 1;"), _T("}") };
+	EXPECT_FALSE(SemanticMerge::MergeMovedDefinition(base, renamed, reindented, traits, merged));
+
+	// both changed the same token differently: no merge
+	const std::vector<String> otherEdit = { _T("int F(int a)"), _T("{"), _T("\treturn a + 3;"), _T("}") };
+	const std::vector<String> moverEdit = { _T("int F(int a)"), _T("{"), _T("\treturn a + 4;"), _T("}") };
+	EXPECT_FALSE(SemanticMerge::MergeMovedDefinition(base, moverEdit, otherEdit, traits, merged));
 }
 
 // ---------------------------------------------------------------------------

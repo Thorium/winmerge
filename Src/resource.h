@@ -113,7 +113,6 @@
 #define IDD_DARK_FONT_DIALOG            289
 #define IDD_COMPARISON_RESULT_FILTER    290
 #define IDD_FILTERS_MATCHINSIDE         291
-#define IDD_SEMANTIC_PREVIEW_DLG        294
 #define IDI_ROTATE2                     302
 #define IDR_LOGO                        307
 #define IDR_MARGIN_ICONS_PNG            310
@@ -749,8 +748,6 @@
 #define IDC_COLOR_SCHEME_SAVE           1693
 #define IDC_COLOR_SCHEME_DELETE         1694
 #define IDC_USERDATA_LOCATION           1695
-#define IDC_SEMANTIC_PREVIEW_HEADER     1696
-#define IDC_SEMANTIC_PREVIEW_CODE       1697
 #define IDC_RECENT_COMPARES_SHOW        1698
 #define IDC_RECENT_COMPARES_LIST        1699
 #define IDC_RADIO_INCLUDE               1700
@@ -940,11 +937,8 @@
 #define ID_ALL_LEFT                     32857
 #define ID_AUTO_MERGE                   32858
 #define ID_SEMANTIC_MERGE               32897
-#define ID_SEMANTIC_MERGE_LEFT          32898
-#define ID_SEMANTIC_MERGE_MIDDLE        32899
-#define ID_SEMANTIC_MERGE_RIGHT         32900
 #define ID_SEMANTIC_MERGE_ALL           32901
-#define ID_SEMANTIC_MERGE_AUTO_FALLBACK 32902
+#define ID_SEMANTIC_MERGE_OPTION        32902
 #define ID_NEXT_SEMANTIC_RESOLUTION     32905
 #define ID_PREV_SEMANTIC_RESOLUTION     32906
 #define ID_MERGE_DELETE                 32859

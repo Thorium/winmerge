@@ -31,6 +31,7 @@
 #include "SemanticMergeAnalyzer.h"
 #include <algorithm>
 #include <iterator>
+#include <unordered_set>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -292,6 +293,7 @@ void CMergeDoc::BuildMergeResult()
 {
 	if (m_nBuffers < 2 || m_ptResultBuf == nullptr || !m_ptBuf[m_nMergeBasePane]->IsInitialized())
 		return;
+	m_nSemanticSidesErrors = -1;
 
 	CMergeResultTextBuffer::InternalOpGuard guard(*m_ptResultBuf);
 
@@ -831,11 +833,11 @@ String ResultPaneLabel(int nPane)
 
 int CMergeDoc::GetResultSemanticCount() const
 {
-	std::vector<int> ids;
+	std::unordered_set<int> ids;
 	for (const auto& seg : m_resultSegments)
 	{
-		if (seg.state == ResultSegmentState::Semantic && std::find(ids.begin(), ids.end(), seg.semanticId) == ids.end())
-			ids.push_back(seg.semanticId);
+		if (seg.state == ResultSegmentState::Semantic)
+			ids.insert(seg.semanticId);
 	}
 	return static_cast<int>(ids.size());
 }
@@ -916,8 +918,9 @@ int CMergeDoc::EndSemanticResolution(const SemanticResolutionSnapshot& before, S
 	const int nLineCount = m_ptResultBuf->GetLineCount();
 	auto isChanged = [&](const MergeResultSegment& seg)
 	{
+		// a segment the snapshot does not know is not claimed for the rule
 		if (seg.diffIdx >= static_cast<int>(before.entries.size()) || before.entries[seg.diffIdx].diffIdx != seg.diffIdx)
-			return true;
+			return false;
 		const auto& entry = before.entries[seg.diffIdx];
 		if (entry.state != seg.state || entry.srcPanes != seg.srcPanes || entry.nLines != seg.nLines)
 			return true;
@@ -2256,18 +2259,23 @@ bool CMergeDoc::IsSemanticResultSyntaxOk(int nPane, int nBeginLine, int nEndLine
 	const CTreeSitterLanguage* pLang = (pParser != nullptr && pParser->HasLanguage()) ? pParser->GetLanguage() : nullptr;
 	if (pLang == nullptr)
 		return false;
-	const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
-	auto wholeFile = [&](int nFilePane)
+	// the compared panes are read-only during a merge session, so the sides'
+	// counts hold until the result is built again
+	if (m_nSemanticSidesErrors < 0)
 	{
-		return GetPaneApparentLinesText(nFilePane, 0, m_ptBuf[nFilePane]->GetLineCount() - 1, nullptr);
-	};
+		const MergePanes& panes = GetMergePaneMapping(m_nMergeBasePane);
+		auto wholeFile = [&](int nFilePane)
+		{
+			return GetPaneApparentLinesText(nFilePane, 0, m_ptBuf[nFilePane]->GetLineCount() - 1, nullptr);
+		};
+		m_nSemanticSidesErrors = (std::max)(pLang->CountSyntaxErrors(wholeFile(panes.nMinePane)),
+			pLang->CountSyntaxErrors(wholeFile(panes.nTheirsPane)));
+	}
 	const int nLastLine = m_ptBuf[nPane]->GetLineCount() - 1;
 	const String text = GetPaneApparentLinesText(nPane, 0, nBeginLine - 1, nullptr) + newText +
 		GetPaneApparentLinesText(nPane, nEndLine + 1, nLastLine, nullptr);
 	const int nErrors = pLang->CountSyntaxErrors(text);
-	const int nMineErrors = pLang->CountSyntaxErrors(wholeFile(panes.nMinePane));
-	const int nTheirsErrors = pLang->CountSyntaxErrors(wholeFile(panes.nTheirsPane));
-	return nErrors >= 0 && nErrors <= (std::max)(nMineErrors, nTheirsErrors);
+	return nErrors >= 0 && nErrors <= m_nSemanticSidesErrors;
 }
 
 /**

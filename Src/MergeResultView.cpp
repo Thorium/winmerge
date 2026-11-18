@@ -112,7 +112,7 @@ BEGIN_MESSAGE_MAP(CMergeResultView, CGhostTextView)
 	ON_UPDATE_COMMAND_UI(ID_NEXT_SEMANTIC_RESOLUTION, OnUpdateNextSemanticResolution)
 	ON_COMMAND(ID_PREV_SEMANTIC_RESOLUTION, OnPrevSemanticResolution)
 	ON_UPDATE_COMMAND_UI(ID_PREV_SEMANTIC_RESOLUTION, OnUpdatePrevSemanticResolution)
-	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, OnToolTipText)
+	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0x7FFFFFFF, OnToolTipText)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
@@ -453,32 +453,44 @@ BOOL CMergeResultView::OnToolTipText(UINT, NMHDR* pNMHDR, LRESULT* pResult)
 	return TRUE;
 }
 
-void CMergeResultView::OnNextSemanticResolution()
+/**
+ * @brief Move to the next (or previous) semantic resolution from the caret
+ * of this view; the compared panes call this too.
+ */
+void CMergeResultView::GoToSemanticResolution(bool bForward)
 {
-	const int nDiff = GetDocument()->FindResultSemanticDiff(GetCursorPos().y, true);
+	if (m_pTextBuffer == nullptr)
+		return;
+	const int nDiff = GetDocument()->FindResultSemanticDiff(GetCursorPos().y, bForward);
 	if (nDiff < 0)
 		return;
 	SelectDiff(nDiff);
 	ScrollToDiff(nDiff);
+}
+
+bool CMergeResultView::CanGoToSemanticResolution(bool bForward)
+{
+	return m_pTextBuffer != nullptr && GetDocument()->FindResultSemanticDiff(GetCursorPos().y, bForward) >= 0;
+}
+
+void CMergeResultView::OnNextSemanticResolution()
+{
+	GoToSemanticResolution(true);
 }
 
 void CMergeResultView::OnPrevSemanticResolution()
 {
-	const int nDiff = GetDocument()->FindResultSemanticDiff(GetCursorPos().y, false);
-	if (nDiff < 0)
-		return;
-	SelectDiff(nDiff);
-	ScrollToDiff(nDiff);
+	GoToSemanticResolution(false);
 }
 
 void CMergeResultView::OnUpdateNextSemanticResolution(CCmdUI* pCmdUI)
 {
-	pCmdUI->Enable(m_pTextBuffer != nullptr && GetDocument()->FindResultSemanticDiff(GetCursorPos().y, true) >= 0);
+	pCmdUI->Enable(CanGoToSemanticResolution(true));
 }
 
 void CMergeResultView::OnUpdatePrevSemanticResolution(CCmdUI* pCmdUI)
 {
-	pCmdUI->Enable(m_pTextBuffer != nullptr && GetDocument()->FindResultSemanticDiff(GetCursorPos().y, false) >= 0);
+	pCmdUI->Enable(CanGoToSemanticResolution(false));
 }
 
 /**

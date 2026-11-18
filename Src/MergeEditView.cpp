@@ -201,6 +201,8 @@ BEGIN_MESSAGE_MAP(CMergeEditView, CGhostTextView)
 	ON_UPDATE_COMMAND_UI(ID_SEMANTIC_MERGE_ALL, OnUpdateSemanticMergeAll)
 	ON_COMMAND(ID_SEMANTIC_MERGE_OPTION, OnSemanticMergeOption)
 	ON_UPDATE_COMMAND_UI(ID_SEMANTIC_MERGE_OPTION, OnUpdateSemanticMergeOption)
+	ON_COMMAND_RANGE(ID_NEXT_SEMANTIC_RESOLUTION, ID_PREV_SEMANTIC_RESOLUTION, OnSemanticResolutionNavigation)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_NEXT_SEMANTIC_RESOLUTION, ID_PREV_SEMANTIC_RESOLUTION, OnUpdateSemanticResolutionNavigation)
 	ON_COMMAND(ID_L2R, OnL2r)
 	ON_UPDATE_COMMAND_UI(ID_L2R, OnUpdateL2r)
 	ON_COMMAND(ID_LINES_L2R, OnLinesL2r)
@@ -2231,7 +2233,22 @@ void CMergeEditView::OnSemanticMergeOption()
 void CMergeEditView::OnUpdateSemanticMergeOption(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(GetDocument()->m_nBuffers == 3);
-	pCmdUI->SetCheck(GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE));
+	pCmdUI->SetCheck(GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE) || theApp.GetSemanticMergeForRun());
+}
+
+/** @brief Next/Previous Semantic Resolution while a compared pane is active: the result pane's */
+void CMergeEditView::OnSemanticResolutionNavigation(UINT nID)
+{
+	CMergeDoc* pDoc = GetDocument();
+	if (pDoc->GetMergeResultBuildState() && pDoc->GetMergeResultView() != nullptr)
+		pDoc->GetMergeResultView()->GoToSemanticResolution(nID == ID_NEXT_SEMANTIC_RESOLUTION);
+}
+
+void CMergeEditView::OnUpdateSemanticResolutionNavigation(CCmdUI* pCmdUI)
+{
+	CMergeDoc* pDoc = GetDocument();
+	pCmdUI->Enable(pDoc->GetMergeResultBuildState() && pDoc->GetMergeResultView() != nullptr &&
+		pDoc->GetMergeResultView()->CanGoToSemanticResolution(pCmdUI->m_nID == ID_NEXT_SEMANTIC_RESOLUTION));
 }
 
 

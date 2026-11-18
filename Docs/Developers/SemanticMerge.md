@@ -58,8 +58,8 @@ One option, `OPT_SEMANTIC_MERGE` (`Settings/SemanticMerge`), off by default:
 - **Merge > Semantic Merge > Resolve Conflicts Semantically (Experimental)**,
   a check item for the same option.
 
-Requirements (`CMergeDoc::GetSemanticMergeUnavailableReason`, shown when a
-command runs without them):
+Requirements (`CMergeDoc::GetSemanticMergeUnavailableReason`; checked by
+Auto Merge and the commands alike, and shown when a command runs without them):
 
 - three files are compared and the Merge Result Pane option is on;
 - a grammar exists for the file type, and all three panes parse with it.
@@ -240,7 +240,7 @@ line merge already handles them or because they are not merges:
 | Auto Merge (toolbar, `Merge > Auto Merge`) with the option on | The pipeline over all conflicts, then the non-conflicting differences are merged as before. | `ApplyAutoMergeToResult` |
 | **Resolve Conflict Semantically** (`Ctrl+Alt+Shift+M`), from the result pane or a compared pane | R2–R6 on the conflict at the cursor (from a compared pane, the definition under the cursor is preferred). If no rule applies, a message names each rule and why it declined. | `ResolveConflictSemantically` |
 | **Resolve All Conflicts Semantically** (`Ctrl+Alt+Shift+A`) | The pipeline over all pending conflicts, without the line merge. | `DoSemanticMergeConflictsToResult` |
-| Command line `-semantic` together with `/al`, `/am` or `/ar` | Turns the option on for this run only, then behaves like Auto Merge. With `-o` and `-noninteractive` the result is saved. | `MergeCmdLineInfo::m_bSemanticMerge` |
+| Command line `-semantic` together with `/al`, `/am` or `/ar` | Turns semantic merge on for this run only (a flag on the app, never written to the saved option), then behaves like Auto Merge. With `-o` and `-noninteractive` the result is saved. | `CMergeApp::GetSemanticMergeForRun` |
 
 The commands are in **Merge > Semantic Merge** and in the result pane's
 context menu. Without a merge session they start one, as Auto Merge does.

@@ -114,6 +114,7 @@ CMergeApp::CMergeApp() :
 , m_mainThreadScripts(nullptr)
 , m_nLastCompareResult(-1)
 , m_bNonInteractive(false)
+, m_bSemanticMergeForRun(false)
 , m_pOptions(nullptr)
 , m_pGlobalFileFilter(nullptr)
 , m_nActiveOperations(0)
@@ -331,8 +332,7 @@ BOOL CMergeApp::InitInstance()
 
 	Options::Init(m_pOptions.get()); // Implementation in OptionsInit.cpp
 	ApplyCommandLineConfigOptions(cmdInfo);
-	if (cmdInfo.m_bSemanticMerge)
-		GetOptionsMgr()->Set(OPT_SEMANTIC_MERGE, true);
+	m_bSemanticMergeForRun = cmdInfo.m_bSemanticMerge;
 	if (cmdInfo.m_sErrorMessages.size() > 0)
 	{
 		for (auto& msg : cmdInfo.m_sErrorMessages)

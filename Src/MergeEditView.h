@@ -287,6 +287,8 @@ protected:
 	afx_msg void OnUpdateSemanticMergeAll(CCmdUI* pCmdUI);
 	afx_msg void OnSemanticMergeOption();
 	afx_msg void OnUpdateSemanticMergeOption(CCmdUI* pCmdUI);
+	afx_msg void OnSemanticResolutionNavigation(UINT nID);
+	afx_msg void OnUpdateSemanticResolutionNavigation(CCmdUI* pCmdUI);
 	afx_msg void OnCopyX2Y(UINT nID);
 	afx_msg void OnCopyLinesX2Y(UINT nID);
 	afx_msg void OnX2Y(int srcPane, int dstPane, bool selectedLineOnly = false);

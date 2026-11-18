@@ -53,6 +53,8 @@ public:
 	/** @brief Make this view the frame's active, focused view. */
 	void TakeFocus();
 	void GetSelectedDiffs(int& firstDiff, int& lastDiff);
+	void GoToSemanticResolution(bool bForward);
+	bool CanGoToSemanticResolution(bool bForward);
 
 private:
 	int LineToDiff(int nLine) const;

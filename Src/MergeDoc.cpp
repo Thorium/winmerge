@@ -64,9 +64,6 @@
 #include "SemanticMergeAnalyzer.h"
 #include "TreeSitterParser.h"
 #include <algorithm>
-#include <climits>
-#include <cstdlib>
-#include <unordered_map>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -144,7 +141,7 @@ CTreeSitterParser* CMergeDoc::GetTreeSitterParser(int nBuffer)
  */
 bool CMergeDoc::IsSemanticMergeEnabled() const
 {
-	return m_nBuffers == 3 && GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE) &&
+	return m_nBuffers == 3 && (GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE) || theApp.GetSemanticMergeForRun()) &&
 		GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED);
 }
 
@@ -157,7 +154,7 @@ String CMergeDoc::GetSemanticMergeUnavailableReason()
 		return _("Semantic merge needs three compared files.");
 	if (!GetOptionsMgr()->GetBool(OPT_MERGE_RESULT_PANE_ENABLED))
 		return _("Semantic merge works in the Merge Result pane, which is turned off.");
-	if (!GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE))
+	if (!GetOptionsMgr()->GetBool(OPT_SEMANTIC_MERGE) && !theApp.GetSemanticMergeForRun())
 		return _("Semantic merge is turned off (Merge > Resolve Conflicts Semantically).");
 	for (int nPane = 0; nPane < m_nBuffers; ++nPane)
 	{
@@ -228,7 +225,8 @@ bool CMergeDoc::TryResolveConflictSemantically(int nDiff, bool& bGroupWithPrevio
  */
 int CMergeDoc::DoSemanticMergeConflictsToResult()
 {
-	if (!m_bResultBuilt || !IsSemanticMergeEnabled())
+	// the same requirements as the commands, grammar included (section 4)
+	if (!m_bResultBuilt || !GetSemanticMergeUnavailableReason().empty())
 		return 0;
 
 	int nApplied = 0;

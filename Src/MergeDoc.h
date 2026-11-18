@@ -438,6 +438,7 @@ private:
 	int EndSemanticResolution(const SemanticResolutionSnapshot& before, SemanticRule rule, const String& reason);
 	SemanticResolutionCounts m_semanticCounts; /**< Semantic resolutions since the last reset */
 	int m_nLastSemanticId = 0; /**< Id of the latest semantic resolution */
+	int m_nSemanticSidesErrors = -1; /**< G4: worse of the two sides' syntax error counts; -1 until counted for this result */
 	std::unique_ptr<CMergeResultTextBuffer> m_ptResultBuf; /**< Merge result buffer (not part of the diff) */
 	CMergeResultView* m_pMergeResultView; /**< Merge result view, or nullptr */
 	std::vector<MergeResultSegment> m_resultSegments; /**< Segments covering the result buffer */

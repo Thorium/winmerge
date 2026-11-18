@@ -140,6 +140,7 @@ private:
 struct TreeSitterLineBlock
 {
 	int nCharPos;
+	int nEndCharPos;
 	int nColorIndex;
 	int nPriority;
 	int nLayerPriority;

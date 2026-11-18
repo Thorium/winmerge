@@ -109,9 +109,23 @@ struct DefinitionInfo
 	String text;
 };
 
+/** @brief What kind of change a suggestion carries over. */
+enum class SuggestionKind
+{
+	DefinitionChange,     /**< whole definition from the only side that changed it */
+	StringLiteral,        /**< one string literal change replayed onto a refactored definition */
+	ParameterRename,      /**< one parameter rename replayed onto a refactored definition */
+	IdentifierRename,     /**< one identifier rename replayed onto a refactored definition */
+	CommentedOut,         /**< edited definition written into its commented-out copy */
+	Insertion,            /**< definition added on one side, inserted next to its neighbour */
+	IndependentAdditions, /**< definitions added by either side, inserted together */
+	AgreedVersion,        /**< the version the two other panes agree on */
+};
+
 /** @brief A proposed safe semantic merge for one destination definition. */
 struct Suggestion
 {
+	SuggestionKind kind = SuggestionKind::DefinitionChange;
 	TagRange tags[3];
 	DefinitionInfo defs[3];
 	int unchangedPane = -1;

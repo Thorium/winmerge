@@ -2353,9 +2353,12 @@ bool CMergeEditView::SemanticMergeToResult(int dstPane, bool bAll)
 
 	String message;
 	bool applied = false;
+	pDoc->ResetSemanticResolutionCounts();
 	if (bAll)
 	{
 		applied = pDoc->DoAllSemanticMergeSuggestions(dstPane, message);
+		if (applied && pDoc->GetSemanticResolutionCounts().Total() > 0)
+			message = pDoc->FormatSemanticResolutionReport();
 	}
 	else
 	{
@@ -2386,7 +2389,7 @@ bool CMergeEditView::SemanticMergeToResult(int dstPane, bool bAll)
 			pDoc->OnResultPaneCurrentDiffChanged(nDiff);
 	}
 
-	if (applied)
+	if (applied && !bAll)
 		RootLogger::Info(message);
 	else
 		AfxMessageBox(message.c_str(), MB_ICONINFORMATION);

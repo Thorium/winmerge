@@ -30,6 +30,7 @@
 #include "resource.h"
 #include "SemanticMergeAnalyzer.h"
 #include <algorithm>
+#include <iterator>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -464,8 +465,9 @@ void CMergeDoc::ApplyAutoMergeToResult()
 	// Optionally try safe semantic copy on the conflicts first: the line
 	// merge resolves the one-sided fragments of a conflicting definition
 	// independently, which can leave it semantically mangled
-	if (GetOptionsMgr()->GetBool(OPT_AUTO_MERGE_SEMANTIC_FALLBACK))
-		DoSemanticMergeConflictsToResult();
+	ResetSemanticResolutionCounts();
+	const int nSemantic = GetOptionsMgr()->GetBool(OPT_AUTO_MERGE_SEMANTIC_FALLBACK) ?
+		DoSemanticMergeConflictsToResult() : 0;
 
 	CMergeResultTextBuffer::InternalOpGuard guard(*m_ptResultBuf);
 
@@ -474,7 +476,8 @@ void CMergeDoc::ApplyAutoMergeToResult()
 	const int nMergeDestPane = m_nBuffers == 2 ? 1 :
 		GetMergePaneMapping(m_nMergeBasePane).nMergeDestPane;
 
-	m_ptResultBuf->BeginUndoGroup(false);
+	// one undo step for the whole Auto Merge, semantic resolutions included
+	m_ptResultBuf->BeginUndoGroup(nSemantic > 0);
 
 	for (int i = static_cast<int>(m_resultSegments.size()) - 1; i >= 0; --i)
 	{
@@ -523,6 +526,14 @@ void CMergeDoc::ApplyAutoMergeToResult()
 
 	m_pMergeResultView->ShowCursor();
 	m_pMergeResultView->Invalidate();
+
+	const String report = FormatSemanticResolutionReport();
+	if (!report.empty())
+	{
+		RootLogger::Info(report);
+		if (!theApp.GetNonInteractive())
+			ShowMessageBox(report, MB_ICONINFORMATION);
+	}
 }
 
 bool CMergeDoc::IsMergeResultModified() const
@@ -782,9 +793,173 @@ tchar_t CMergeDoc::GetResultLineMarker(int nLine) const
 	case ResultSegmentState::Auto:
 	case ResultSegmentState::Chosen:
 		return srcPaneMarker();
+	case ResultSegmentState::Semantic:
+		return _T('s');
 	default:
 		return 0;
 	}
+}
+
+String SemanticRuleName(SemanticRule rule)
+{
+	switch (rule)
+	{
+	case SemanticRule::DuplicateAddition: return _("Duplicate addition");
+	case SemanticRule::TokenMerge: return _("Token merge");
+	case SemanticRule::MovedDefinition: return _("Moved definition");
+	case SemanticRule::DefinitionChange: return _("One-sided definition change");
+	case SemanticRule::LocalizedChange: return _("Small change onto refactored definition");
+	case SemanticRule::CommentedOut: return _("Commented-out definition update");
+	case SemanticRule::DefinitionAddition: return _("Definition addition");
+	case SemanticRule::AgreedVersion: return _("Agreed version");
+	default: return String();
+	}
+}
+
+namespace
+{
+
+String ResultPaneLabel(int nPane)
+{
+	switch (nPane)
+	{
+	case 0: return _("Left");
+	case 1: return _("Middle");
+	case 2: return _("Right");
+	default: return String();
+	}
+}
+
+}
+
+int CMergeDoc::GetResultSemanticCount() const
+{
+	std::vector<int> ids;
+	for (const auto& seg : m_resultSegments)
+	{
+		if (seg.state == ResultSegmentState::Semantic && std::find(ids.begin(), ids.end(), seg.semanticId) == ids.end())
+			ids.push_back(seg.semanticId);
+	}
+	return static_cast<int>(ids.size());
+}
+
+int CMergeDoc::FindResultSemanticDiff(int nFromLine, bool bForward) const
+{
+	// whole resolutions: skip the one at the line, and land on the first
+	// segment of the one found
+	const MergeResultSegment* pAt = GetResultSegmentByLine(nFromLine);
+	const int nCurrentId = (pAt != nullptr && pAt->state == ResultSegmentState::Semantic) ? pAt->semanticId : 0;
+	int nFoundId = 0;
+	for (const auto& seg : m_resultSegments)
+	{
+		if (seg.state != ResultSegmentState::Semantic || seg.diffIdx < 0 || seg.semanticId == nCurrentId)
+			continue;
+		if (bForward ? seg.nStartLine > nFromLine : seg.nStartLine + (std::max)(seg.nLines, 1) - 1 < nFromLine)
+		{
+			nFoundId = seg.semanticId;
+			if (bForward)
+				break;
+		}
+	}
+	if (nFoundId == 0)
+		return -1;
+	for (const auto& seg : m_resultSegments)
+	{
+		if (seg.state == ResultSegmentState::Semantic && seg.diffIdx >= 0 && seg.semanticId == nFoundId)
+			return seg.diffIdx;
+	}
+	return -1;
+}
+
+String CMergeDoc::FormatSemanticResolutionReport() const
+{
+	const int nTotal = m_semanticCounts.Total();
+	if (nTotal == 0)
+		return String();
+	String report = strutils::format_string1(_("Resolved semantically: %1"), strutils::to_str(nTotal));
+	for (int nRule = 0; nRule < static_cast<int>(std::size(m_semanticCounts.counts)); ++nRule)
+	{
+		if (m_semanticCounts.counts[nRule] > 0)
+			report += _T("\n  ") + SemanticRuleName(static_cast<SemanticRule>(nRule)) + _T(": ") +
+				strutils::to_str(m_semanticCounts.counts[nRule]);
+	}
+	return report;
+}
+
+/**
+ * @brief Record the linked segments before a semantic rule changes the result.
+ */
+SemanticResolutionSnapshot CMergeDoc::BeginSemanticResolution() const
+{
+	SemanticResolutionSnapshot snapshot;
+	snapshot.nRevision = m_ptResultBuf != nullptr ? m_ptResultBuf->GetCurrentRevisionNumber() : 0;
+	snapshot.entries.resize(m_resultDiffToSegment.size());
+	for (const auto& seg : m_resultSegments)
+	{
+		if (seg.diffIdx < 0 || seg.diffIdx >= static_cast<int>(snapshot.entries.size()))
+			continue;
+		auto& entry = snapshot.entries[seg.diffIdx];
+		entry.diffIdx = seg.diffIdx;
+		entry.state = seg.state;
+		entry.srcPanes = seg.srcPanes;
+		entry.nLines = seg.nLines;
+	}
+	return snapshot;
+}
+
+/**
+ * @brief Mark the linked segments a semantic rule changed since the
+ * snapshot as resolved by that rule, count the resolution and log it.
+ * @return Number of segments marked.
+ */
+int CMergeDoc::EndSemanticResolution(const SemanticResolutionSnapshot& before, SemanticRule rule, const String& reason)
+{
+	if (m_ptResultBuf == nullptr)
+		return 0;
+	const int nLineCount = m_ptResultBuf->GetLineCount();
+	auto isChanged = [&](const MergeResultSegment& seg)
+	{
+		if (seg.diffIdx >= static_cast<int>(before.entries.size()) || before.entries[seg.diffIdx].diffIdx != seg.diffIdx)
+			return true;
+		const auto& entry = before.entries[seg.diffIdx];
+		if (entry.state != seg.state || entry.srcPanes != seg.srcPanes || entry.nLines != seg.nLines)
+			return true;
+		for (int nLine = seg.nStartLine; nLine < seg.nStartLine + seg.nLines && nLine < nLineCount; ++nLine)
+		{
+			if (m_ptResultBuf->GetLineRevisionNumber(nLine) > before.nRevision)
+				return true;
+		}
+		return false;
+	};
+
+	const uint32_t nRevision = m_ptResultBuf->GetCurrentRevisionNumber();
+	const int nId = m_nLastSemanticId + 1;
+	int nMarked = 0;
+	int nFirstLine = -1;
+	for (auto& seg : m_resultSegments)
+	{
+		if (seg.diffIdx < 0 || !isChanged(seg))
+			continue;
+		seg.state = ResultSegmentState::Semantic;
+		seg.semanticRule = rule;
+		seg.semanticReason = reason;
+		seg.semanticId = nId;
+		// later hand edits are newer than this
+		seg.nBaseRevision = nRevision;
+		if (nFirstLine < 0)
+			nFirstLine = seg.nStartLine;
+		++nMarked;
+	}
+	if (nMarked == 0)
+		return 0;
+
+	m_nLastSemanticId = nId;
+	++m_semanticCounts.counts[static_cast<int>(rule)];
+	RootLogger::Info(strutils::format_string2(_("Resolved semantically at result line %1: %2"),
+		strutils::to_str(nFirstLine + 1), reason));
+	if (m_pMergeResultView != nullptr && m_pMergeResultView->GetSafeHwnd() != nullptr)
+		m_pMergeResultView->Invalidate();
+	return nMarked;
 }
 
 /**
@@ -2238,7 +2413,8 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 	{
 		const ResultSegmentState state = m_resultSegments[m_resultDiffToSegment[nDiff]].state;
 		bAnyPending = bAnyPending || state == ResultSegmentState::Conflict || state == ResultSegmentState::Unresolved;
-		bAnyByHand = bAnyByHand || state == ResultSegmentState::Chosen || state == ResultSegmentState::Edited;
+		bAnyByHand = bAnyByHand || state == ResultSegmentState::Chosen || state == ResultSegmentState::Edited ||
+			state == ResultSegmentState::Semantic;
 	}
 	if (!bExplicit && (!bAnyPending || bAnyByHand))
 	{
@@ -2335,6 +2511,47 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 		return true;
 	};
 
+	const SemanticResolutionSnapshot before = BeginSemanticResolution();
+	auto recordResolution = [&]()
+	{
+		SemanticRule rule = SemanticRule::DefinitionChange;
+		String reason;
+		const String& name = suggestion.displayName;
+		const String changed = ResultPaneLabel(suggestion.changedPane);
+		switch (suggestion.kind)
+		{
+		case SemanticMerge::SuggestionKind::DefinitionChange:
+			reason = strutils::format_string2(_("One-sided change of %1: only %2 changed it"), name, ResultPaneLabel(srcPane));
+			break;
+		case SemanticMerge::SuggestionKind::StringLiteral:
+			rule = SemanticRule::LocalizedChange;
+			reason = strutils::format_string2(_("%1: the string literal change of %2 replayed onto the refactored version"), name, changed);
+			break;
+		case SemanticMerge::SuggestionKind::ParameterRename:
+			rule = SemanticRule::LocalizedChange;
+			reason = strutils::format_string2(_("%1: the parameter rename of %2 replayed onto the refactored version"), name, changed);
+			break;
+		case SemanticMerge::SuggestionKind::IdentifierRename:
+			rule = SemanticRule::LocalizedChange;
+			reason = strutils::format_string2(_("%1: the identifier rename of %2 replayed onto the refactored version"), name, changed);
+			break;
+		case SemanticMerge::SuggestionKind::CommentedOut:
+			rule = SemanticRule::CommentedOut;
+			reason = strutils::format_string2(_("Commented-out %1 updated with the edit of %2"), name, changed);
+			break;
+		case SemanticMerge::SuggestionKind::Insertion:
+		case SemanticMerge::SuggestionKind::IndependentAdditions:
+			rule = SemanticRule::DefinitionAddition;
+			reason = strutils::format_string1(_("Added definition %1"), name);
+			break;
+		case SemanticMerge::SuggestionKind::AgreedVersion:
+			rule = SemanticRule::AgreedVersion;
+			reason = strutils::format_string1(_("%1: took the version the two other panes agree on"), name);
+			break;
+		}
+		EndSemanticResolution(before, rule, reason);
+	};
+
 	int nBudget = 20000;
 	if (!diffs.empty() && MatchSemanticRegion(items, 0, wanted, 0, nBudget))
 	{
@@ -2344,7 +2561,9 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 			if (item.nDiff >= 0)
 				bChanged = choose(item.nDiff, item.candidates[item.nChosen]) || bChanged;
 		}
-		if (!bChanged)
+		if (bChanged)
+			recordResolution();
+		else
 			message = _("The merge result already contains this suggestion.");
 		return bChanged;
 	}
@@ -2356,6 +2575,8 @@ bool CMergeDoc::ApplySemanticSuggestionToResult(int dstPane,
 		message = failed;
 	else if (nRewritten == 0)
 		message = _("The merge result already contains this suggestion.");
+	else
+		recordResolution();
 	return nRewritten > 0;
 
 }
@@ -2473,9 +2694,13 @@ bool CMergeDoc::TryTokenMergeConflictToResult(int nDiff, bool& bGroupWithPreviou
 	if (nMergedErrors < 0 || nMergedErrors > (std::max)(nMineErrors, nTheirsErrors))
 		return false;
 
+	const SemanticResolutionSnapshot snapshot = BeginSemanticResolution();
 	if (!ResultResolveWithText(nDiff, merged, bGroupWithPrevious))
 		return false;
 	bGroupWithPrevious = true;
+	EndSemanticResolution(snapshot, SemanticRule::TokenMerge,
+		strutils::format_string2(_("Token merge: %1 and %2 changed different parts of these lines"),
+			ResultPaneLabel(panes.nMinePane), ResultPaneLabel(panes.nTheirsPane)));
 	return true;
 }
 
@@ -2707,8 +2932,9 @@ bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevi
 		if (nSegment < 0)
 			return false;
 		const ResultSegmentState state = m_resultSegments[nSegment].state;
-		if (state == ResultSegmentState::Chosen || state == ResultSegmentState::Edited)
-			return false; // already decided by hand
+		if (state == ResultSegmentState::Chosen || state == ResultSegmentState::Edited ||
+			state == ResultSegmentState::Semantic)
+			return false; // already decided
 		if (paneLines(nEditor, pdi, bOld ? &editorTag : nullptr) != paneLines(nBase, pdi, bOld ? &baseTag : nullptr))
 			return false;
 		bConflictIsOld = bConflictIsOld || (bOld && i == nDiff);
@@ -2751,8 +2977,14 @@ bool CMergeDoc::TryMovedDefinitionMergeToResult(int nDiff, bool& bGroupWithPrevi
 	if (nMergedErrors < 0 || nMergedErrors > nMoverErrors)
 		return false;
 
-	return RewritePaneLinesInResult(nMover, moverTag.startLine, moverTag.endLine, mergedLines, diffs,
-		bGroupWithPrevious) > 0;
+	const SemanticResolutionSnapshot before = BeginSemanticResolution();
+	if (RewritePaneLinesInResult(nMover, moverTag.startLine, moverTag.endLine, mergedLines, diffs,
+		bGroupWithPrevious) <= 0)
+		return false;
+	EndSemanticResolution(before, SemanticRule::MovedDefinition,
+		strutils::format_string3(_("Moved definition %1: %2 moved it, %3 edited it"),
+			ucr::toTString(baseTag.name), ResultPaneLabel(nMover), ResultPaneLabel(nEditor)));
+	return true;
 }
 
 /**
@@ -2842,8 +3074,12 @@ int CMergeDoc::ResolveDuplicateAdditionsInResult(bool& bGroupWithPrevious)
 		else
 			continue;
 
+		const SemanticResolutionSnapshot before = BeginSemanticResolution();
 		ResultChooseSource(nDropDiff, panes.nBasePane, bGroupWithPrevious);
 		bGroupWithPrevious = true;
+		EndSemanticResolution(before, SemanticRule::DuplicateAddition,
+			strutils::format_string3(_("Duplicate addition of %1: %2 and %3 both added it; kept once"),
+				ucr::toTString(tag.name), ResultPaneLabel(nMine), ResultPaneLabel(nTheirs)));
 		++nResolved;
 	}
 	return nResolved;

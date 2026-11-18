@@ -1,0 +1,104 @@
+diff --git a/Docs/Manual/English/Command_line.xml b/Docs/Manual/English/Command_line.xml
+index f4221bb78..e064c2e72 100644
+--- a/Docs/Manual/English/Command_line.xml
++++ b/Docs/Manual/English/Command_line.xml
+@@ -106,12 +106,20 @@
+ 
+       <arg choice="opt" rep="norepeat"><option>/ar</option></arg>
+ 
++      <arg choice="opt" rep="norepeat"><option>/sml</option></arg>
++
++      <arg choice="opt" rep="norepeat"><option>/smm</option></arg>
++
++      <arg choice="opt" rep="norepeat"><option>/smr</option></arg>
++
+       <arg choice="opt" rep="norepeat"><option>/noninteractive</option></arg>
+ 
+       <arg choice="opt" rep="norepeat"><option>/noprefs</option></arg>
+ 
+       <arg choice="opt" rep="norepeat"><option>/enableexitcode</option></arg>
+ 
++      <arg choice="opt" rep="norepeat"><option>/checkonly</option></arg>
++
+       <arg choice="opt" rep="norepeat"><option>/ignorews</option></arg>
+ 
+       <arg choice="opt" rep="norepeat"><option>/ignoreblanklines</option></arg>
+@@ -124,6 +132,8 @@
+ 
+       <arg choice="opt" rep="norepeat"><option>/ignorecomments</option></arg>
+ 
++      <arg choice="opt" rep="norepeat"><option>/ignoretrailingpunctuation</option></arg>
++
+       <arg choice="opt" rep="norepeat"><option>/unpacker</option>
+       <replaceable>unpacker-name</replaceable></arg>
+ 
+@@ -562,6 +572,27 @@
+       </listitem>
+     </varlistentry>
+ 
++    <varlistentry>
++      <term><option>/sml</option></term>
++      <listitem>
++        <para>Runs the experimental semantic auto-merge loop at startup and applies safe semantic suggestions into the left side. This switch force-enables the experimental semantic merge option for the current process only.</para>
++      </listitem>
++    </varlistentry>
++
++    <varlistentry>
++      <term><option>/smm</option></term>
++      <listitem>
++        <para>Runs the experimental semantic auto-merge loop at startup and applies safe semantic suggestions into the middle side. This switch force-enables the experimental semantic merge option for the current process only.</para>
++      </listitem>
++    </varlistentry>
++
++    <varlistentry>
++      <term><option>/smr</option></term>
++      <listitem>
++        <para>Runs the experimental semantic auto-merge loop at startup and applies safe semantic suggestions into the right side. This switch force-enables the experimental semantic merge option for the current process only.</para>
++      </listitem>
++    </varlistentry>
++
+     <varlistentry>
+       <term><option>/noninteractive</option></term>
+       <listitem>
+@@ -590,6 +621,20 @@
+       </listitem>
+     </varlistentry>
+ 
++    <varlistentry>
++      <term><option>/checkonly</option></term>
++      <listitem>
++        <para>Compares the files and exits with the comparison result as the process exit
++        code (0: identical, 1: different, 2: error) without leaving a window open or showing
++        any dialogs. This is a convenience preset equivalent to
++        <option>/noninteractive /enableexitcode</option>, intended for scripting and CI.
++        Combine it with <option>/ignorecomments</option>, <option>/ignoreeol</option> and/or
++        <option>/ignorews</option> for a semantic-equivalence check that ignores comment and
++        formatting differences (the comment filter is tree-sitter-aware when a grammar is
++        available for the file type).</para>
++      </listitem>
++    </varlistentry>
++
+     <varlistentry>
+       <term><option>/ignorews</option></term>
+       <listitem>
+@@ -657,6 +702,20 @@
+       </listitem>
+     </varlistentry>
+ 
++    <varlistentry>
++      <term><option>/ignoretrailingpunctuation</option></term>
++      <listitem>
++        <para>Controls the "Ignore trailing punctuation" option persistently. When enabled,
++        a difference that consists only of a trailing comma or semicolon at the end of a line
++        (for example a trailing comma added to the last element of a multi-line list) is
++        treated as trivial and not reported as a change:</para>
++        <itemizedlist>
++          <listitem><para><option>/ignoretrailingpunctuation:0</option> - disables ignoring trailing punctuation.</para></listitem>
++          <listitem><para><option>/ignoretrailingpunctuation</option> or <option>/ignoretrailingpunctuation:1</option> - enables ignoring trailing punctuation.</para></listitem>
++        </itemizedlist>
++      </listitem>
++    </varlistentry>
++
+     <varlistentry>
+       <term><option>/unpacker <replaceable>plugin pipeline</replaceable></option></term>
+       <listitem>

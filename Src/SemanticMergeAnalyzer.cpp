@@ -819,6 +819,7 @@ bool Analyzer::TryBuildInsertionSuggestion(int dstPane, const DiffInfo& diff, Su
 		insertedText = _T("\n") + insertedText;
 	}
 
+	suggestion.kind = SuggestionKind::Insertion;
 	suggestion.changedPane = addedPane;
 	suggestion.defs[addedPane].pane = addedPane;
 	suggestion.defs[addedPane].tag = addedTag;
@@ -999,6 +1000,9 @@ bool Analyzer::FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, S
 			return false;
 		}
 
+		suggestion.kind = localizedReplayKind == LocalizedReplayKind::StringLiteral ? SuggestionKind::StringLiteral :
+			localizedReplayKind == LocalizedReplayKind::ParameterRename ? SuggestionKind::ParameterRename :
+			SuggestionKind::IdentifierRename;
 		suggestion.unchangedPane = unchangedPane;
 		suggestion.changedPane = localizedChangePane;
 		suggestion.displayName = ucr::toTString(suggestion.tags[0].name);
@@ -1017,6 +1021,7 @@ bool Analyzer::FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, S
 		// The destination holds the odd-one-out version while the two other
 		// panes agree: adopt their agreed definition (catching the pane up
 		// after an earlier copy, or explicitly reverting the change).
+		suggestion.kind = SuggestionKind::AgreedVersion;
 		suggestion.srcPane = suggestion.unchangedPane;
 		suggestion.displayName = ucr::toTString(suggestion.tags[0].name);
 		suggestion.replacementText = suggestion.defs[suggestion.unchangedPane].text;
@@ -1030,6 +1035,7 @@ bool Analyzer::FinalizeStandardSuggestion(int dstPane, Suggestion& suggestion, S
 		return false;
 	}
 
+	suggestion.kind = SuggestionKind::DefinitionChange;
 	suggestion.srcPane = suggestion.changedPane;
 	suggestion.displayName = ucr::toTString(suggestion.tags[0].name);
 	suggestion.replacementText = suggestion.defs[suggestion.changedPane].text;
@@ -1133,6 +1139,7 @@ bool Analyzer::TryBuildCommentedBlockSuggestion(int dstPane, const DiffInfo& dif
 	suggestion.defs[unchangedPane].text = (unchangedPane == otherPane1) ? text1 : text2;
 	suggestion.defs[changedPane].text = changedText;
 
+	suggestion.kind = SuggestionKind::CommentedOut;
 	suggestion.unchangedPane = unchangedPane;
 	suggestion.changedPane = changedPane;
 	suggestion.displayName = ucr::toTString(suggestion.tags[unchangedPane].name);
@@ -1430,6 +1437,7 @@ bool Analyzer::TryCollectIndependentAdditionSuggestions(int dstPane, std::vector
 		}
 		combinedText = group.beforeNext ? (combinedText + _T("\n\n")) : (_T("\n\n") + combinedText);
 
+		suggestion.kind = SuggestionKind::IndependentAdditions;
 		suggestion.insertOnly = true;
 		suggestion.insertLine = group.insertLine;
 		suggestion.insertChar = group.insertChar;

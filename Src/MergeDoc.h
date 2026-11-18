@@ -381,8 +381,17 @@ public:
 	/** @brief Would deleting the given range destroy a placeholder line? */
 	bool IsResultDeleteTouchingPlaceholder(int nStartLine, int nStartPos,
 		int nEndLine, int nEndPos) const;
-	/** @brief Margin provenance marker for a result line ('1'..'3', 'm', '?'), 0 for none */
+	/** @brief Margin provenance marker for a result line ('1'..'3', 'm', '?', 's'), 0 for none */
 	tchar_t GetResultLineMarker(int nLine) const;
+	/** @brief Number of semantic resolutions in the result (one can cover several differences) */
+	int GetResultSemanticCount() const;
+	/** @brief Next (or previous) semantically resolved difference from a result line, -1 for none */
+	int FindResultSemanticDiff(int nFromLine, bool bForward) const;
+	/** @brief Semantic resolutions made since the counts were last reset, per rule */
+	const SemanticResolutionCounts& GetSemanticResolutionCounts() const { return m_semanticCounts; }
+	void ResetSemanticResolutionCounts() { m_semanticCounts = SemanticResolutionCounts(); }
+	/** @brief Auto Merge report lines for the semantic resolutions counted, empty for none */
+	String FormatSemanticResolutionReport() const;
 	const MergeResultSegment* GetResultSegmentByLine(int nLine) const;
 	const MergeResultSegment* GetResultSegmentByDiff(int nDiff) const;
 
@@ -425,6 +434,10 @@ private:
 		std::vector<String>& lines, std::vector<int>& apparent) const;
 	bool ApplySemanticSuggestionToResult(int dstPane, const SemanticMerge::Suggestion& suggestion, bool bExplicit,
 		bool& bGroupWithPrevious, String& message);
+	SemanticResolutionSnapshot BeginSemanticResolution() const;
+	int EndSemanticResolution(const SemanticResolutionSnapshot& before, SemanticRule rule, const String& reason);
+	SemanticResolutionCounts m_semanticCounts; /**< Semantic resolutions since the last reset */
+	int m_nLastSemanticId = 0; /**< Id of the latest semantic resolution */
 	std::unique_ptr<CMergeResultTextBuffer> m_ptResultBuf; /**< Merge result buffer (not part of the diff) */
 	CMergeResultView* m_pMergeResultView; /**< Merge result view, or nullptr */
 	std::vector<MergeResultSegment> m_resultSegments; /**< Segments covering the result buffer */

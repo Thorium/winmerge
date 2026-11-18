@@ -26,7 +26,7 @@ enum class ResultSegmentState
 };
 
 /**
- * @brief Semantic merge rule that resolved a segment (Docs/Developers/SemanticMerge.md, section 5).
+ * @brief Semantic merge rule that resolved a segment (Docs/Developers/SemanticMerge.md, section 4).
  */
 enum class SemanticRule
 {

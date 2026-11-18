@@ -2154,7 +2154,7 @@ void CMergeEditView::OnUpdateSemanticMergeAll(CCmdUI* pCmdUI)
 /**
  * @brief The semantic pipeline from a command, on the conflict at the
  * cursor or on every pending conflict (Docs/Developers/SemanticMerge.md,
- * section 6). Without a merge session it starts one the way Auto Merge does.
+ * section 5). Without a merge session it starts one the way Auto Merge does.
  */
 void CMergeEditView::ResolveSemantically(bool bAll)
 {

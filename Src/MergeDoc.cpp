@@ -137,7 +137,7 @@ CTreeSitterParser* CMergeDoc::GetTreeSitterParser(int nBuffer)
 
 /**
  * @brief Is semantic conflict resolution on for this comparison?
- * (Docs/Developers/SemanticMerge.md, section 4)
+ * (Docs/Developers/SemanticMerge.md, section 2)
  */
 bool CMergeDoc::IsSemanticMergeEnabled() const
 {
